@@ -214,22 +214,22 @@ class CardRenderer:
                 return best[:3]
         raise LayoutError(f"Bullets do not fit ({best[3]}px > {max_height}px) at minimum readable size")
 
-    def _draw_background(self, canvas: Image.Image, date_text: str) -> None:
+    def _draw_background(self, canvas: Image.Image, date_line: str, time_line: str) -> None:
         d = ImageDraw.Draw(canvas)
         d.rectangle((0, 0, WIDTH, HEIGHT), fill=BLACK)
         # Subtle central panel and border.
         d.rounded_rectangle((18, 18, WIDTH - 18, HEIGHT - 18), radius=30, outline=GOLD_DARK, width=5)
         d.rounded_rectangle((28, 28, WIDTH - 28, HEIGHT - 28), radius=26, outline=(52, 39, 13), width=2)
-        # Programmatic abstract dotted globe — no third-party artwork.
-        cx, cy, radius = 850, 112, 92
-        for ring in range(1, 6):
-            ry = radius * ring / 5
-            for i in range(8, 26):
-                angle = 2 * math.pi * i / 32
+        # Programmatic dotted world-map motif behind the date badge.
+        cx, cy, radius = 815, 105, 118
+        for ring in range(1, 7):
+            ry = radius * ring / 6
+            for i in range(8, 30):
+                angle = 2 * math.pi * i / 36
                 x = cx + radius * math.cos(angle)
                 y = cy + ry * math.sin(angle)
-                if 760 < x < 1010 and 35 < y < 190:
-                    d.ellipse((x - 1, y - 1, x + 1, y + 1), fill=(69, 51, 16))
+                if 680 < x < 1030 and 25 < y < 190:
+                    d.ellipse((x - 1.5, y - 1.5, x + 1.5, y + 1.5), fill=(69, 51, 16))
         for i in range(5):
             d.line((35 + 2 * i, 32 + 52 * i, 105 + 2 * i, 30 + 52 * i), fill=GOLD_LIGHT if i == 0 else GOLD_DARK, width=5 if i == 0 else 2)
         # Corner accents.
@@ -237,21 +237,29 @@ class CardRenderer:
             x0 = 20 if sx == 0 else WIDTH - 145
             d.line((x0, HEIGHT - 120, x0 + 115, HEIGHT - 20), fill=GOLD_DARK, width=16)
             d.line((x0, HEIGHT - 145, x0 + 115, HEIGHT - 34), fill=(58, 41, 10), width=5)
-        # Date badge.
-        df = self._font(False, 21, "SemiBold")
-        tw = d.textlength(date_text, font=df)
-        x0 = WIDTH - 40 - tw - 46
-        d.rounded_rectangle((x0, 44, WIDTH - 40, 92), radius=14, fill=(15, 13, 9), outline=GOLD_DARK, width=2)
-        d.text((WIDTH - 54, 58), date_text, font=df, fill=GOLD_LIGHT, anchor="ra")
+        # Two-line date badge, matching the reference card.
+        df = self._font(False, 19, "SemiBold")
+        tf = self._font(False, 17, "Medium")
+        tw = max(d.textlength(date_line, font=df), d.textlength(time_line, font=tf))
+        x0 = WIDTH - 40 - tw - 54
+        badge = (x0, 46, WIDTH - 40, 128)
+        d.rounded_rectangle(badge, radius=16, fill=(15, 13, 9), outline=GOLD_DARK, width=2)
+        d.text((WIDTH - 54, 60), date_line, font=df, fill=GOLD_LIGHT, anchor="ra")
+        d.text((WIDTH - 54, 91), time_line, font=tf, fill=MUTED, anchor="ra")
         # Small calendar glyph.
-        d.rounded_rectangle((x0 + 8, 53, x0 + 32, 79), radius=4, outline=GOLD_LIGHT, width=2)
-        d.line((x0 + 8, 61, x0 + 32, 61), fill=GOLD_LIGHT, width=2)
+        d.rounded_rectangle((x0 + 10, 62, x0 + 38, 94), radius=5, outline=GOLD_LIGHT, width=2)
+        d.line((x0 + 10, 72, x0 + 38, 72), fill=GOLD_LIGHT, width=2)
+        d.line((x0 + 18, 58, x0 + 18, 66), fill=GOLD_LIGHT, width=2)
+        d.line((x0 + 30, 58, x0 + 30, 66), fill=GOLD_LIGHT, width=2)
 
     def _draw_headline(self, canvas: Image.Image, text: str, rtl: bool, y: int,
                        height: int = 92) -> None:
         d = ImageDraw.Draw(canvas)
         box = (38, y, WIDTH - 38, y + height)
         angled_banner(canvas, box, gradient((box[2] - box[0], box[3] - box[1]), GOLD_LIGHT, GOLD))
+        # Twin slashes on the left edge, as in the supplied reference design.
+        d.line((48, y + 12, 72, y + height - 12), fill=GOLD_DARK, width=5)
+        d.line((60, y + 12, 84, y + height - 12), fill=GOLD_DARK, width=3)
         sizes = [40, 37, 34, 31, 28] if rtl else [42, 39, 36, 33, 30, 27]
         max_width = 900
         for size in sizes:
@@ -288,18 +296,21 @@ class CardRenderer:
 
     def _draw_photo(self, canvas: Image.Image, media: dict[str, Any], box: tuple[int, int, int, int]) -> None:
         x0, y0, x1, y1 = box
+        w, h = x1 - x0, y1 - y0
         with Image.open(media["local_path"]) as src:
-            im = ImageOps.fit(src.convert("RGB"), (x1 - x0, y1 - y0), method=Image.Resampling.LANCZOS)
-        canvas.paste(im, (x0, y0))
+            im = ImageOps.fit(src.convert("RGB"), (w, h), method=Image.Resampling.LANCZOS)
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=22, fill=255)
+        canvas.paste(im, (x0, y0), mask)
         d = ImageDraw.Draw(canvas)
-        d.rectangle(box, outline=GOLD, width=4)
+        d.rounded_rectangle((x0, y0, x1 - 1, y1 - 1), radius=22, outline=GOLD, width=4)
         credit = f"Photo: {media['credit']} | {media['license_ref']}"
         cf = self._font(False, 15, "Medium")
         # Clamp credit to panel width and draw on a dark strip.
-        while d.textlength(credit, font=cf) > (x1 - x0 - 16) and len(credit) > 20:
+        while d.textlength(credit, font=cf) > (w - 24) and len(credit) > 20:
             credit = credit[:-5] + "…"
-        d.rectangle((x0, y1 - 28, x1, y1), fill=(0, 0, 0))
-        d.text((x0 + 8, y1 - 25), credit, font=cf, fill=GOLD_LIGHT)
+        d.rectangle((x0 + 4, y1 - 32, x1 - 4, y1 - 4), fill=(0, 0, 0))
+        d.text((x0 + 12, y1 - 29), credit, font=cf, fill=GOLD_LIGHT)
 
     def draw_card(self, content: EditorialContent, output_path: Path, *,
                   media: list[dict[str, Any]] | dict[str, Any] | None = None,
@@ -317,45 +328,44 @@ class CardRenderer:
             raise LayoutError("Each card requires 3-5 corresponding Urdu and Roman Urdu bullets")
 
         pub_dt = datetime.fromisoformat((content.publication_time or iso()).replace("Z", "+00:00")).astimezone(ZoneInfo("Asia/Kolkata"))
-        date_text = pub_dt.strftime("%d %b %Y  |  %I:%M %p IST").upper()
+        date_line = pub_dt.strftime("%d %b %Y").upper()
+        time_line = pub_dt.strftime("%I:%M %p IST")
         canvas = Image.new("RGB", (WIDTH, HEIGHT), BLACK)
-        self._draw_background(canvas, date_text)
+        self._draw_background(canvas, date_line, time_line)
         d = ImageDraw.Draw(canvas)
 
         logo = load_logo()
         top_logo_box = paste_logo(canvas, logo, 120, 42, 104)
-        brand_font = self._font(False, 19, "SemiBold")
+        brand_font = self._font(False, 17, "SemiBold")
         d.text((190, 128), "AZAD STUDIO", font=brand_font, fill=MUTED, anchor="la")
 
-        # Compact vertical rhythm: the LATEST NEWS banner and both news sections
-        # are slightly smaller, leaving clean space for the byline below the logo.
-        heading_y, heading_h = 166, 74
-        urdu_headline_y, headline_h = 258, 92
-        urdu_label_y = 366
-        urdu_bullets_y, urdu_bullets_h = 398, 284
-        urdu_photo_box = (585, 386, 1035, 590)
-        separator_y = 704
-        roman_headline_y = 734
-        roman_label_y = 846
-        roman_bullets_y, roman_bullets_h = 878, 280
-        roman_photo_box = (585, 866, 1035, 1070)
-        bottom_logo_y = 1178
-        byline_y = 1262
-        footer_y = 1308
+        # Reference-faithful proportions: a narrower LATEST NEWS ribbon, taller
+        # news-image panels, and no section labels. The exact monogram, byline,
+        # and two-photo support are preserved.
+        heading_y, heading_h, heading_x1 = 166, 82, 700
+        urdu_headline_y, headline_h = 282, 86
+        urdu_bullets_y, urdu_bullets_h = 398, 300
+        urdu_photo_box = (620, 392, 1035, 700)
+        separator_y = 730
+        roman_headline_y = 766
+        roman_bullets_y, roman_bullets_h = 884, 276
+        roman_photo_box = (620, 876, 1035, 1158)
+        bottom_logo_y = 1164
+        byline_y = 1250
+        footer_y = 1298
 
-        # Main heading must remain exactly LATEST NEWS.
-        red_box = (35, heading_y, WIDTH - 35, heading_y + heading_h)
+        # Main heading must remain exactly LATEST NEWS, but use the narrower
+        # angled ribbon from the supplied reference card.
+        red_box = (35, heading_y, heading_x1, heading_y + heading_h)
         angled_banner(canvas, red_box, gradient((red_box[2] - red_box[0], red_box[3] - red_box[1]), RED_LIGHT, RED), border=GOLD_LIGHT)
-        heading_font = self._font(False, 54, "ExtraBold")
-        d.text((112, heading_y + 10), "LATEST NEWS", font=heading_font, fill=WHITE, stroke_width=1, stroke_fill=(60, 0, 0))
+        heading_font = self._font(False, 52, "ExtraBold")
+        d.text((150, heading_y + 12), "LATEST NEWS", font=heading_font, fill=WHITE, stroke_width=1, stroke_fill=(60, 0, 0))
         # Megaphone icon, drawn programmatically.
-        d.polygon([(50, heading_y + 26), (68, heading_y + 26), (84, heading_y + 14),
-                   (84, heading_y + 51), (68, heading_y + 42), (50, heading_y + 42)], fill=WHITE)
-        d.arc((48, heading_y + 36, 70, heading_y + 66), 270, 90, fill=WHITE, width=4)
+        d.polygon([(52, heading_y + 28), (70, heading_y + 28), (88, heading_y + 16),
+                   (88, heading_y + 56), (70, heading_y + 45), (52, heading_y + 45)], fill=WHITE)
+        d.arc((50, heading_y + 38, 74, heading_y + 70), 270, 90, fill=WHITE, width=4)
 
         self._draw_headline(canvas, content.urdu_headline, True, urdu_headline_y, headline_h)
-        d.text((WIDTH - 70, urdu_label_y), "URDU SUMMARY", font=self._font(False, 20, "Bold"),
-               fill=MUTED, anchor="ra")
 
         # Up to two rights-cleared photos occupy reserved panels, mirroring the
         # reference card: one beside the Urdu copy, one beside the Roman copy.
@@ -368,13 +378,13 @@ class CardRenderer:
         if urdu_photo:
             self._draw_photo(canvas, urdu_photo, urdu_photo_box)
             photo_boxes.append(urdu_photo_box)
-            urdu_max_width = 490
-            urdu_text_x = 555
-            urdu_bullet_x = 575
+            urdu_max_width = 500
+            urdu_text_x = 590
+            urdu_bullet_x = 610
         urdu_end = self._draw_bullets(canvas, urdu_bullets, True, urdu_bullets_y,
                                       urdu_bullets_h, urdu_max_width,
                                       urdu_text_x, urdu_bullet_x, compact=bool(urdu_photo))
-        if urdu_end > 700:
+        if urdu_end > 706:
             raise LayoutError("Urdu bullet area overflowed its reserved region")
 
         # Separator with diamond.
@@ -384,20 +394,19 @@ class CardRenderer:
         d.polygon(diamond, fill=GOLD)
 
         self._draw_headline(canvas, content.roman_headline, False, roman_headline_y, headline_h)
-        d.text((70, roman_label_y), "ROMAN URDU", font=self._font(False, 22, "Bold"), fill=MUTED)
         roman_max_width = 900
         roman_text_x = 135
         roman_bullet_x = 88
         if roman_photo:
             self._draw_photo(canvas, roman_photo, roman_photo_box)
             photo_boxes.append(roman_photo_box)
-            roman_max_width = 450
+            roman_max_width = 470
             roman_text_x = 120
             roman_bullet_x = 88
         roman_end = self._draw_bullets(canvas, roman_bullets, False, roman_bullets_y,
                                        roman_bullets_h, roman_max_width, roman_text_x,
                                        roman_bullet_x, compact=bool(roman_photo))
-        if roman_end > 1165:
+        if roman_end > 1160:
             raise LayoutError("Roman Urdu bullet area overflowed its reserved region")
 
         bottom_logo_box = paste_logo(canvas, logo, WIDTH // 2, bottom_logo_y, 62)
@@ -411,7 +420,8 @@ class CardRenderer:
         canvas.save(output_path, format="PNG", optimize=True)
         digest = sha256_file(output_path)
         visual = self.visual_inspection(output_path, top_logo_box, bottom_logo_box,
-                                        photo_boxes=photo_boxes, byline_box=byline_box)
+                                        photo_boxes=photo_boxes, byline_box=byline_box,
+                                        heading_box=red_box)
         audit = {
             "rendered_at": iso(),
             "logo_asset": str(self.config.logo_path),
@@ -423,6 +433,8 @@ class CardRenderer:
             "latin_font": self.config.latin_font_path.name,
             "rtl_engine": "libraqm",
             "heading": "LATEST NEWS",
+            "heading_box": red_box,
+            "design_reference": "two NEWS IMAGE panels; narrow angled LATEST NEWS ribbon",
             "byline": BYLINE,
             "page_number": page_number,
             "page_count": page_count,
@@ -441,7 +453,8 @@ class CardRenderer:
     def visual_inspection(self, path: Path, top_box: tuple[int, int, int, int],
                           bottom_box: tuple[int, int, int, int],
                           photo_boxes: list[tuple[int, int, int, int]] | None = None,
-                          byline_box: tuple[int, int, int, int] | None = None) -> dict[str, Any]:
+                          byline_box: tuple[int, int, int, int] | None = None,
+                          heading_box: tuple[int, int, int, int] | None = None) -> dict[str, Any]:
         with Image.open(path) as im:
             size = im.size
             rgb = im.convert("RGB")
@@ -452,6 +465,8 @@ class CardRenderer:
             "logo_top_pixels": _gold_pixel_count(rgb, top_box) > 100,
             "logo_bottom_pixels": _gold_pixel_count(rgb, bottom_box) > 60,
         }
+        if heading_box:
+            checks["narrow_latest_news_ribbon"] = (heading_box[2] - heading_box[0]) < 720
         if byline_box:
             checks["byline_pixels"] = _gold_pixel_count(rgb, byline_box) > 40
         for idx, box in enumerate(photo_boxes or [], 1):

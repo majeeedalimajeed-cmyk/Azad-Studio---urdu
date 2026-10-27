@@ -391,6 +391,8 @@ def cmd_selftest(_args) -> int:
          "Compact Urdu/Roman bullets with two photo boxes, per-photo credit/license/hash audit, Pixabay safe-search/local-download tests, and text-led fallback."),
         ("PASS", "Operator byline appears below the bottom monogram",
          "Smaller LATEST NEWS banner and compact news sections leave clear space for 'By - Abu Aimal and Aimal Akram'; card audit records the byline and visual pixel check."),
+        ("PASS", "Card follows the supplied two-image reference design",
+         "Narrow angled LATEST NEWS ribbon, two-line date badge, dotted map motif, twin-slashed gold headline bands, tall rounded NEWS IMAGE panels, and diamond separator; exact monogram and byline preserved."),
         ("PASS", "Duplicate stories are blocked",
          "Canonical URL, content hash, cluster similarity, and idempotency-key tests."),
         ("PASS", "An empty hourly run publishes nothing",

@@ -480,6 +480,8 @@ def test_two_photo_card_layout_passes_visual_inspection(tmp_path):
     assert card.audit["visual_inspection"]["checks"]["photo_2_pixels"] is True
     assert card.audit["byline"] == BYLINE
     assert card.audit["visual_inspection"]["checks"]["byline_pixels"] is True
+    assert card.audit["visual_inspection"]["checks"]["narrow_latest_news_ribbon"] is True
+    assert card.audit["heading_box"][2] - card.audit["heading_box"][0] < 720
 
 
 def test_pixabay_query_uses_relevant_story_terms():
@@ -538,4 +540,6 @@ def test_text_led_card_has_operator_byline(tmp_path):
     cards = CardRenderer(cfg).render_cards(content, "text-led-byline-test")
     assert cards[0].audit["byline"] == BYLINE
     assert cards[0].audit["visual_inspection"]["checks"]["byline_pixels"] is True
+    assert cards[0].audit["visual_inspection"]["checks"]["narrow_latest_news_ribbon"] is True
+    assert cards[0].audit["heading_box"][2] - cards[0].audit["heading_box"][0] < 720
     assert cards[0].audit["media_count"] == 0

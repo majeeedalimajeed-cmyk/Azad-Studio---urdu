@@ -6,7 +6,7 @@ Command: `python3 -m pytest -q tests`
 
 ```text
 ........................                                                 [100%]
-24 passed in 5.88s
+24 passed in 5.66s
 ```
 
 ## Required behavior checks
@@ -23,6 +23,7 @@ Command: `python3 -m pytest -q tests`
 | PASS | Card design is readable and consistent | Deterministic 1080x1350 template, RTL/LTR shaping, overflow checks, and visual inspection flag. |
 | PASS | Two-photo cards remain readable and rights-cleared | Compact Urdu/Roman bullets with two photo boxes, per-photo credit/license/hash audit, Pixabay safe-search/local-download tests, and text-led fallback. |
 | PASS | Operator byline appears below the bottom monogram | Smaller LATEST NEWS banner and compact news sections leave clear space for 'By - Abu Aimal and Aimal Akram'; card audit records the byline and visual pixel check. |
+| PASS | Card follows the supplied two-image reference design | Narrow angled LATEST NEWS ribbon, two-line date badge, dotted map motif, twin-slashed gold headline bands, tall rounded NEWS IMAGE panels, and diamond separator; exact monogram and byline preserved. |
 | PASS | Duplicate stories are blocked | Canonical URL, content hash, cluster similarity, and idempotency-key tests. |
 | PASS | An empty hourly run publishes nothing | Empty-scan test asserts zero cards, zero captions, and zero publish attempts. |
 | PASS | Breaking-news verification starts promptly | Fresh-candidate breaking test enqueues a priority verification job. |
