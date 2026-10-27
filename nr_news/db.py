@@ -280,7 +280,10 @@ class Database:
         return cid, True
 
     def update_candidate(self, cid: str, **fields: Any) -> None:
-        allowed = {"cluster_id", "status", "review_reason", "updated_at", "body_excerpt", "body_excerpt_hash"}
+        allowed = {"cluster_id", "status", "review_reason", "updated_at", "body_excerpt",
+                   "body_excerpt_hash", "raw_json", "external_links_json", "published_at",
+                   "original_headline", "category", "title_hash", "fingerprint", "image_url",
+                   "image_credit", "image_license", "language"}
         pairs = [(k, v) for k, v in fields.items() if k in allowed]
         if not pairs:
             return

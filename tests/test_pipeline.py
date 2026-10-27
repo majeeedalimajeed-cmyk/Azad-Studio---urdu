@@ -76,6 +76,25 @@ def test_exact_logo_and_fonts():
     assert CONFIG.latin_font_path.exists()
 
 
+def test_fixture_refreshes_short_source_scan_candidate(tmp_path):
+    cfg = temp_config(tmp_path)
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    short = sample_candidate(
+        url="https://www.etemaaddaily.com/education-and-jobs-news/tgpsc-reschedules-aee-civil-exam-to-november-7-for-ssc-je-candidates:344",
+        original_headline="TGPSC AEE exam date change",
+        body_excerpt="Short source-scan excerpt.",
+        external_links=[],
+    )
+    cid, created = db.insert_candidate(pipeline.research._to_row(short, "hourly"))
+    assert created
+    result = pipeline.run_fixture(FIXTURE, dry_run=True)
+    assert result["status"] == "rendered"
+    refreshed = db.get_candidate(cid)
+    assert refreshed and len(refreshed["body_excerpt"]) > 80
+    assert "TGPSC" in refreshed["body_excerpt"]
+
+
 def test_fixture_renders_valid_bilingual_card(tmp_path):
     cfg = temp_config(tmp_path)
     pipeline = NewsPipeline(cfg)

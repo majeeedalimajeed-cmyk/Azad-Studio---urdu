@@ -248,6 +248,27 @@ class NewsPipeline:
         row["raw"] = raw
         cid, created = self.db.insert_candidate(row)
         if not created:
+            # A source scan may already have stored a shorter excerpt for this
+            # URL. Refresh it with the operator-supplied verified fixture data
+            # before Agent B and the duplicate checks run.
+            self.db.update_candidate(
+                cid,
+                body_excerpt=row["body_excerpt"],
+                body_excerpt_hash=row["body_excerpt_hash"],
+                raw_json=json_dumps(raw),
+                external_links_json=json_dumps(row["external_links"]),
+                published_at=row.get("published_at"),
+                original_headline=row["original_headline"],
+                category=row.get("category"),
+                title_hash=row["title_hash"],
+                fingerprint=row["fingerprint"],
+                image_url=row.get("image_url"),
+                image_credit=row.get("image_credit"),
+                image_license=row.get("image_license"),
+                language=row.get("language"),
+                status="new",
+                review_reason=None,
+            )
             # Re-running the same fixture is a duplicate event, not a new post.
             existing = self.db.one(
                 "SELECT id FROM editorials WHERE content_hash=?",
