@@ -66,6 +66,7 @@ Database tables include `source_status`, `clusters`, `candidates`, `review_queue
 - Required permissions/tasks include `pages_manage_posts`, `pages_read_engagement`, `pages_show_list`, and Page tasks `CREATE_CONTENT`, `MANAGE`, `MODERATE`. Confirm them in Meta's [permissions reference](https://developers.facebook.com/docs/permissions).
 - The numeric profile ID `61595929711037` is **not** assumed to be a Page ID. `FacebookGraphClient.verify_identity()` resolves the configured profile URL, an explicit `NR_FB_PAGE_ID`, or the exact expected Page name via `/me/accounts`; it verifies required permissions/tasks, checks the Page token against `/{page_id}`, and stores the confirmed Page ID/name/time in the database.
 - Dry-run Graph API verification has confirmed the publishing identity as **Page ID `1383450338187017`**, name **`Azad Studio`**, canonical link `https://www.facebook.com/1383450338187017`. The original profile URL is kept only as a lookup hint/audit note.
+- If the short-lived user token expires, the previously API-confirmed Page is re-verified directly with the long-lived Page token and the stored Page ID/name. A fresh database still requires a working user token for the initial identity check. Refresh `FB_USER_ACCESS_TOKEN` to restore full `/me/accounts` and feed reconciliation.
 - Live publishing additionally requires `NR_DRY_RUN=false`, `NR_PUBLISH_ENABLED=true`, `NR_PUBLISH_SAFETY_OK=true`, `NR_OPERATOR_APPROVED=true`, `NR_VERIFY_APPROVED=true`, `NR_AUTO_APPROVE_VERIFIED=true`, `NR_AUTO_POST_ENABLED=true`, a passed visual inspection, `NR_FB_USER_ACCESS_TOKEN`, `NR_FB_PAGE_ACCESS_TOKEN`, `NR_FB_PAGE_ID`, `NR_EXPECTED_PAGE_NAME`, API-confirmed Page identity, and an operator-approved successful test post. `NR_AUTO_POST_ENABLED` is the continuous auto-post kill switch; set it to `false` to stop.
 - Secrets are read from environment variables or `*_FILE` paths. They are never written to source, logs, captions, cards, or prompts.
 
@@ -151,15 +152,16 @@ Use a real always-on host, reverse proxy/TLS, log rotation, database backups, se
 
 ### GitHub Actions and repository secrets
 
-The repository includes five workflows in `.github/workflows/` (full mapping: `deploy/github-actions.md`):
+The repository includes six workflows in `.github/workflows/` (full mapping: `deploy/github-actions.md`):
 
 - `ci.yml` — runs tests, checks the exact logo/fonts, and renders a dry-run fixture card on every push/PR.
 - `verify-facebook.yml` — manually resolves and confirms the Facebook Page through the Graph API.
+- `verify-llm.yml` — manually checks the configured LLM gateway and model IDs without printing keys.
 - `test-post.yml` — manually publishes one operator-approved public test post and confirms it through the Graph API.
 - `hourly-newsroom.yml` — scheduled hourly scan/verification using the durable SQLite cache; publishes only when all auto-post safety variables are enabled, otherwise remains a dry run.
 - `container.yml` — builds and pushes the Docker image to GitHub Container Registry.
 
-The CI, identity, hourly scan and container workflows were validated successfully in dry-run mode; see `reports/LAUNCH_CHECKLIST.md` for run links. The public test-post workflow is dispatched only after explicit operator approval.
+The CI, identity, hourly scan and container workflows were validated successfully in dry-run mode; see `reports/LAUNCH_CHECKLIST.md` for run links. The public test-post workflow is dispatched only after explicit operator approval. The LLM verification workflow currently shows that `GROK_API_KEY` is rejected by xAI and `OPENAI_API_KEY` has no credits; new AI-generated stories are held for review until a working gateway is provided.
 
 Required **repository secrets**:
 

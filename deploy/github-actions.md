@@ -12,7 +12,7 @@ This repository uses **repository secrets** for credentials and **repository var
 | `GROK_API_KEY` | xAI API key | `NR_LLM_API_KEY` |
 | `OPENAI_API_KEY` | Optional fallback key | `NR_LLM_API_KEY` fallback |
 
-The newly added permanent Facebook token belongs in `FB_PAGE_ACCESS_TOKEN` and/or `FB_USER_ACCESS_TOKEN` as appropriate. GitHub secret values are write-only; do not paste them into chat, source, or logs.
+The long-lived Page token belongs in `FB_PAGE_ACCESS_TOKEN`. `FB_USER_ACCESS_TOKEN` should be a long-lived user token for the initial `/me/accounts` identity check and feed reconciliation; GitHub secret values are write-only, so do not paste them into chat, source, or logs. If the user token expires after the Page has already been API-confirmed, `FacebookGraphClient.verify_identity()` falls back to the Page token and the previously confirmed Page ID/name stored in the durable SQLite cache. Refresh `FB_USER_ACCESS_TOKEN` when convenient to restore full `/me/accounts` and feed-reconciliation coverage.
 
 ## Variables
 
@@ -39,6 +39,7 @@ For live auto posting, set `NR_DRY_RUN=false`, `NR_PUBLISH_ENABLED=true`, `NR_PU
 
 - **CI — tests and dry-run card**: push/PR/manual. Runs `check-assets`, `pytest`, and a verified fixture render. Uploads the PNG card as an artifact.
 - **Verify Facebook Page identity**: manual. Maps secrets to env vars and runs `python -m nr_news.cli verify-facebook`. It does not post.
+- **Verify LLM gateway**: manual. Checks the configured model gateway and model IDs without printing keys.
 - **Operator-approved public test post**: manual. Runs the verified regional fixture through the full live publishing path with explicit operator approval, confirms the post through the Graph API, records `facebook_test_post_passed` in the durable SQLite cache, and writes `reports/TEST_POST_RESULT.md`.
 - **Hourly newsroom scan**: hourly/manual. Restores the SQLite cache, verifies Page identity, runs the hourly scan and queued verification jobs, generates a report, and uploads cards/audits/reports. With the auto-post variables enabled it publishes only verified, fresh, non-crime, deduplicated editorials; otherwise it remains a dry run.
 - **Build container image**: push/manual. Builds the Dockerfile and pushes to `ghcr.io/<owner>/azad-studio-urdu`.

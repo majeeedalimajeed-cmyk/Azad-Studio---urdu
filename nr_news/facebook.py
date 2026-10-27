@@ -70,18 +70,27 @@ class FacebookGraphClient:
         """Resolve the configured URL to a managed Page and verify permissions."""
         if not self.config.expected_page_name:
             return {"ok": False, "reason": "NR_EXPECTED_PAGE_NAME is not set; ask the operator for the exact Page name."}
-        if not self.config.facebook_user_token:
-            return {"ok": False, "reason": "Authorized user access token is not available."}
         if not self.config.facebook_page_token:
             return {"ok": False, "reason": "Page access token is not available."}
-        try:
-            accounts = self._call("GET", "/me/accounts", token=self.config.facebook_user_token,
-                                  params={"fields": "id,name,link,tasks", "limit": 100})
-            permissions = self._call("GET", "/me/permissions", token=self.config.facebook_user_token)
-        except GraphAPIError as exc:
-            self.db.insert_api_event("facebook", "verify_identity", "error", str(exc),
-                                     http_status=exc.status, error_code=exc.code)
-            return {"ok": False, "reason": str(exc)}
+
+        accounts: dict[str, Any] | None = None
+        permissions: dict[str, Any] | None = None
+        user_error: GraphAPIError | None = None
+        if self.config.facebook_user_token:
+            try:
+                accounts = self._call("GET", "/me/accounts", token=self.config.facebook_user_token,
+                                      params={"fields": "id,name,link,tasks", "limit": 100})
+                permissions = self._call("GET", "/me/permissions", token=self.config.facebook_user_token)
+            except GraphAPIError as exc:
+                user_error = exc
+                self.db.insert_api_event("facebook", "verify_identity_user_token", "error", str(exc),
+                                         http_status=exc.status, error_code=exc.code)
+        else:
+            user_error = GraphAPIError("Authorized user access token is not available.", code="NO_USER_TOKEN")
+        if user_error or accounts is None or permissions is None:
+            # A long-lived Page token can keep an already API-confirmed Page
+            # publishing even when the short-lived user token has expired.
+            return self._verify_with_page_token(user_error)
 
         pages = accounts.get("data", [])
         hint = self.config.facebook_page_id or self.config.facebook_page_url_hint_id
@@ -150,6 +159,78 @@ class FacebookGraphClient:
                                           "permissions": sorted(granted), "tasks": sorted(tasks)})
         return {"ok": True, "page_id": page_id, "page_name": name, "permissions": sorted(granted), "tasks": sorted(tasks)}
 
+    def _verify_with_page_token(self, user_error: GraphAPIError | None) -> dict[str, Any]:
+        """Fallback for an expired/missing user token on a previously confirmed Page.
+
+        The Page token is checked directly against the configured Page ID and
+        exact expected name. A fresh database with no prior API confirmation
+        still requires a working user token for the initial /me/accounts check.
+        """
+        page_id = self.config.facebook_page_id or self.db.get_setting("facebook_page_id")
+        stored_id = self.db.get_setting("facebook_page_id")
+        previously_verified = bool(self.db.get_setting("facebook_identity_verified_at"))
+        if not page_id:
+            return {"ok": False, "reason": "User token unavailable and no API-confirmed Page ID is available for Page-token verification."}
+        if not previously_verified:
+            return {"ok": False, "reason": "User token unavailable and this database has no prior API-confirmed Page identity."}
+        if stored_id and str(stored_id) != str(page_id):
+            return {"ok": False, "reason": "Configured Page ID does not match the previously API-confirmed Page ID."}
+
+        expected_name = (self.config.expected_page_name or "").strip().casefold()
+        try:
+            confirmed = self._call(
+                "GET", f"/{page_id}", token=self.config.facebook_page_token or "",
+                params={"fields": "id,name,link,category,tasks"},
+            )
+        except GraphAPIError as exc:
+            self.db.insert_api_event("facebook", "verify_page_token_fallback", "error", str(exc),
+                                     http_status=exc.status, error_code=exc.code)
+            return {"ok": False, "reason": str(exc)}
+        name = str(confirmed.get("name", ""))
+        if str(confirmed.get("id", "")) != str(page_id) or name.strip().casefold() != expected_name:
+            reason = "Page token does not match the configured Page ID and exact expected name."
+            self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason,
+                                     details={"page_id": page_id, "expected_name": self.config.expected_page_name})
+            return {"ok": False, "reason": reason}
+
+        tasks = {str(x).upper() for x in confirmed.get("tasks", []) or []}
+        if tasks:
+            missing_tasks = sorted(self.REQUIRED_TASKS - tasks)
+            if missing_tasks:
+                reason = "Page token reports missing required tasks: " + ", ".join(missing_tasks)
+                self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
+                return {"ok": False, "reason": reason}
+
+        granted: dict[str, str] = {}
+        try:
+            perm_payload = self._call("GET", "/me/permissions", token=self.config.facebook_page_token or "")
+            granted = {
+                str(p.get("permission")): str(p.get("status"))
+                for p in perm_payload.get("data", []) if isinstance(p, dict)
+            }
+        except GraphAPIError:
+            # Page tokens do not always expose /me/permissions. The earlier full
+            # user-token verification and the direct Page-token check remain the
+            # authoritative identity evidence.
+            granted = {}
+
+        self.db.set_setting("facebook_page_id", str(page_id))
+        self.db.set_setting("facebook_page_name", name)
+        self.db.set_setting("facebook_page_url", str(confirmed.get("link") or self.config.facebook_page_url))
+        self.db.set_setting("facebook_configured_profile_url", self.config.facebook_page_url)
+        self.db.set_setting("facebook_identity_verified_at", iso())
+        self.db.set_setting("facebook_identity_method", "page_token_fallback")
+        self.db.insert_api_event(
+            "facebook", "verify_page_token_fallback", "ok",
+            "Previously confirmed Page re-verified directly with the Page token.",
+            details={"page_id": page_id, "page_name": name, "tasks": sorted(tasks),
+                     "permissions": sorted(granted),
+                     "user_token_error": redact(str(user_error) if user_error else "missing", self.config.secret_values)},
+        )
+        return {"ok": True, "page_id": str(page_id), "page_name": name,
+                "permissions": sorted(granted), "tasks": sorted(tasks),
+                "identity_method": "page_token_fallback"}
+
     def confirmed_page_id(self) -> str | None:
         if self.db.get_setting("facebook_identity_verified_at"):
             return self.db.get_setting("facebook_page_id")
@@ -172,16 +253,33 @@ class FacebookGraphClient:
         return payload
 
     def find_recent_caption(self, page_id: str, caption_hash_marker: str) -> dict[str, Any] | None:
-        # Feed reconciliation needs pages_read_engagement, which is granted to
-        # the authorized user token; Page tokens are used for publishing.
-        token = self.config.facebook_user_token or self.config.facebook_page_token or ""
-        payload = self._call(
-            "GET", f"/{page_id}/feed", token=token,
-            params={"fields": "id,message,created_time", "limit": 30},
-        )
-        for post in payload.get("data", []):
-            if caption_hash_marker in str(post.get("message", "")):
-                return post
+        # Feed reconciliation normally needs pages_read_engagement on the user
+        # token. If that token expired, try the Page token; some Page tokens can
+        # read the feed, others cannot. Never let a feed-read failure masquerade
+        # as a confirmed duplicate.
+        tokens = [t for t in (self.config.facebook_user_token,
+                              self.config.facebook_page_token) if t]
+        last_error: GraphAPIError | None = None
+        for token in tokens:
+            try:
+                payload = self._call(
+                    "GET", f"/{page_id}/feed", token=token,
+                    params={"fields": "id,message,created_time", "limit": 30},
+                )
+                for post in payload.get("data", []):
+                    if caption_hash_marker in str(post.get("message", "")):
+                        return post
+                return None
+            except GraphAPIError as exc:
+                last_error = exc
+                continue
+        if last_error:
+            self.db.insert_api_event(
+                "facebook", "feed_reconciliation", "error",
+                redact(str(last_error), self.config.secret_values),
+                http_status=last_error.status, error_code=last_error.code,
+                details={"page_id": page_id},
+            )
         return None
 
     def get_post(self, post_id: str) -> dict[str, Any]:

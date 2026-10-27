@@ -14,7 +14,7 @@ from nr_news.agents.translator import TranslationValidator
 from nr_news.agents.verification import VerificationAgent, editorial_exclusion_text
 from nr_news.config import CONFIG, ROOT
 from nr_news.db import Database
-from nr_news.facebook import GraphAPIError
+from nr_news.facebook import FacebookGraphClient, GraphAPIError
 from nr_news.models import Candidate, SourceResult
 from nr_news.pipeline import NewsPipeline
 from nr_news.renderer import verify_logo
@@ -318,6 +318,48 @@ def test_facebook_publishing_blocked_without_api_confirmed_page(tmp_path):
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "held"
     assert any(a["status"] == "held" for a in db.publish_attempts())
+
+
+def test_page_token_fallback_after_user_token_expiry(tmp_path):
+    cfg = temp_config(tmp_path, expected_page_name="Azad Studio", facebook_page_id="123456789",
+                      facebook_user_token="expired-user", facebook_page_token="valid-page")
+    db = Database(cfg.db_path)
+    db.set_setting("facebook_identity_verified_at", iso())
+    db.set_setting("facebook_page_id", "123456789")
+    db.set_setting("facebook_page_name", "Azad Studio ")
+
+    class FakeGraph(FacebookGraphClient):
+        def _call(self, method, path, *, token, params=None, data=None, files=None):
+            if path in {"/me/accounts", "/me/permissions"} and token == "expired-user":
+                raise GraphAPIError("Session has expired", status=401, code="190")
+            if path == "/me/permissions" and token == "valid-page":
+                return {"data": [{"permission": p, "status": "granted"} for p in self.REQUIRED_PERMISSIONS]}
+            if path == "/123456789":
+                return {"id": "123456789", "name": "Azad Studio ",
+                        "link": "https://www.facebook.com/123456789",
+                        "tasks": ["CREATE_CONTENT", "MANAGE", "MODERATE"]}
+            return {}
+
+    result = FakeGraph(db, cfg).verify_identity()
+    assert result["ok"] is True
+    assert result["identity_method"] == "page_token_fallback"
+    assert db.get_setting("facebook_identity_method") == "page_token_fallback"
+
+
+def test_page_token_fallback_requires_prior_confirmation(tmp_path):
+    cfg = temp_config(tmp_path, expected_page_name="Azad Studio", facebook_page_id="123456789",
+                      facebook_user_token="expired-user", facebook_page_token="valid-page")
+    db = Database(cfg.db_path)
+
+    class FakeGraph(FacebookGraphClient):
+        def _call(self, method, path, *, token, params=None, data=None, files=None):
+            if path in {"/me/accounts", "/me/permissions"}:
+                raise GraphAPIError("Session has expired", status=401, code="190")
+            return {}
+
+    result = FakeGraph(db, cfg).verify_identity()
+    assert result["ok"] is False
+    assert "prior API-confirmed" in result["reason"]
 
 
 def test_graph_api_error_is_recorded_without_false_success(tmp_path):
