@@ -1,6 +1,6 @@
 # AZAD STUDIO — Dry-Run Report
 
-Generated: 2026-10-27T17:05:55.725753Z (Asia/Kolkata timezone configured)
+Generated: 2026-10-27T17:12:27.308446Z (Asia/Kolkata timezone configured)
 
 ## Safety state
 - Dry run: `True`
@@ -16,13 +16,13 @@ Generated: 2026-10-27T17:05:55.725753Z (Asia/Kolkata timezone configured)
 - Exact supplied monogram SHA-256: `d0b02c4e7f31f4f58d1e48c08fd3c8d6668bcbbe9e15ef0652a6ff584ede2b3d`
 
 ## Source monitor
-- **etemaad_daily**: ok; items=24; HTTP=200; Urdu home page and new article pages fetched
+- **etemaad_daily**: ok; items=0; HTTP=200; Urdu home page and new article pages fetched
 - **indian_express**: error; items=7; HTTP=None; robots.txt HTTP 403; source marked unavailable; using clearly marked non-publishable snapshot for monitoring
-- **munsif_daily**: ok; items=20; HTTP=200; RSS fetched
-- **the_wire**: ok; items=25; HTTP=200; public WordPress REST API fetched
+- **munsif_daily**: ok; items=12; HTTP=200; RSS fetched
+- **the_wire**: ok; items=12; HTTP=200; public WordPress REST API fetched
 
 ## Counts
-- Candidates: 84
+- Candidates: 87
 - Open review items: 20
 - Editorials: 1
 - Rendered cards: 1
@@ -40,4 +40,5 @@ Generated: 2026-10-27T17:05:55.725753Z (Asia/Kolkata timezone configured)
 - Empty scan publishes nothing: PASS (see tests)
 - Facebook Page identity/targeting: PASS (API-confirmed Page ID and name)
 - Live Facebook publishing: BLOCKED pending operator-approved test post and safety flags
+- GitHub Actions CI/identity/hourly/container workflows: PASS (see reports/LAUNCH_CHECKLIST.md)
 - 24/7 operation: requires deployment to a persistent host using the included service/container files

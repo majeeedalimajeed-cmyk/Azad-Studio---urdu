@@ -142,6 +142,8 @@ The repository includes four workflows in `.github/workflows/` (full mapping: `d
 - `hourly-newsroom.yml` — scheduled hourly scan/verification using the durable SQLite cache; stays in dry run by default.
 - `container.yml` — builds and pushes the Docker image to GitHub Container Registry.
 
+All four workflows have been dispatched successfully in dry-run mode; see `reports/LAUNCH_CHECKLIST.md` for run links.
+
 Required **repository secrets**:
 
 | Secret | Purpose |

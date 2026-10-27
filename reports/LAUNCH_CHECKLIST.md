@@ -32,6 +32,7 @@ The offline pipeline, scheduler logic, card renderer, rights workflow, audit dat
 | Fonts / RTL shaping | PASS | Re-run `check-assets` with libraqm installed. |
 | Offline unit/integration tests | PASS | `13 passed` via `pytest` and `nr_news.cli selftest`. |
 | GitHub Actions secrets / variables | PASS | Repository secrets `FB_USER_ACCESS_TOKEN`, `FB_PAGE_ACCESS_TOKEN`, `FB_PAGE_ID`, `GROK_API_KEY`, `OPENAI_API_KEY` and Grok/xAI variables are configured. Workflows are in `.github/workflows/`. |
+| GitHub Actions remote validation | PASS | Dispatched runs for CI, Verify Facebook Page identity, Build container image, and Hourly newsroom scan all completed successfully in dry-run mode. |
 | Production LLM gateway | PARTIAL | GitHub Actions maps `GROK_API_KEY` to `NR_LLM_API_KEY` with `https://api.x.ai/v1`, `grok-4.7`, and reviewer `grok-4.6`. A local key file is not present, so local LLM jobs remain held. Provide a 600-permission key file only if local generation is needed. |
 | Direct source access | PARTIAL | Munsif, Etemaad, and The Wire direct monitoring works. Indian Express still returns CloudFront 403 from this workspace; its non-publishable snapshot remains a monitoring aid only. Reconfirm from the production host. |
 | Human review workflow | READY / HOLD | Review queue and API/CLI approval exist. An operator must approve real editorials before publication. |
@@ -55,3 +56,10 @@ The offline pipeline, scheduler logic, card renderer, rights workflow, audit dat
 8. Rotate any credentials that were exposed during setup.
 
 Until step 7 is complete, all outputs are dry-run artifacts and no public post should be claimed as published.
+
+## Validated GitHub Actions runs
+
+- CI — tests and dry-run card: https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40547503315
+- Verify Facebook Page identity: https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40547507077
+- Build container image: https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40547467044
+- Hourly newsroom scan: https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40547839216

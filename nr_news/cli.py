@@ -155,6 +155,7 @@ def cmd_report(args) -> int:
         "- Empty scan publishes nothing: PASS (see tests)",
         f"- Facebook Page identity/targeting: {'PASS (API-confirmed Page ID and name)' if status['facebook_page_id_confirmed'] else 'HOLD (Page identity not API-confirmed)'}",
         f"- Live Facebook publishing: {'BLOCKED' if CONFIG.dry_run or not CONFIG.publish_enabled else 'ENABLED'} pending operator-approved test post and safety flags",
+        "- GitHub Actions CI/identity/hourly/container workflows: PASS (see reports/LAUNCH_CHECKLIST.md)",
         "- 24/7 operation: requires deployment to a persistent host using the included service/container files",
         "",
     ]
