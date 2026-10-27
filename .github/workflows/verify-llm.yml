@@ -50,6 +50,7 @@ jobs:
               return text[:800]
 
           any_ok = False
+          openai_chat_ok = False
           for name, key in keys.items():
               if not key:
                   print(name, "MISSING")
@@ -66,8 +67,10 @@ jobs:
                       print(name, base, "models HTTP", r.status_code, body)
                       if r.status_code == 200:
                           any_ok = True
-                          models = [m.get("id") for m in r.json().get("data", [])[:15]]
-                          print("sample model IDs:", models)
+                          ids = [m.get("id") for m in r.json().get("data", [])]
+                          prefixes = ("gpt-4", "gpt-5", "o1", "o3", "o4")
+                          candidates = [x for x in ids if any(x.startswith(p) for p in prefixes)]
+                          print("chat-capable candidates:", candidates[:60])
                   except Exception as exc:
                       print(name, base, "network error", type(exc).__name__)
 
@@ -86,11 +89,35 @@ jobs:
                           timeout=60,
                       )
                       body = safe(r.text, grok_key)
-                      print("chat", model, "HTTP", r.status_code, body)
+                      print("grok chat", model, "HTTP", r.status_code, body)
                       if r.status_code == 200:
                           any_ok = True
                   except Exception as exc:
-                      print("chat", model, "network error", type(exc).__name__)
+                      print("grok chat", model, "network error", type(exc).__name__)
+
+          openai_key = keys.get("OPENAI_API_KEY")
+          if openai_key:
+              base = "https://api.openai.com/v1"
+              for model in ["gpt-4o", "gpt-4o-mini", "gpt-5-chat-latest"]:
+                  try:
+                      r = requests.post(
+                          base + "/chat/completions",
+                          headers={"Authorization": "Bearer " + openai_key},
+                          json={"model": model,
+                                "messages": [{"role": "system", "content": "Return JSON only."},
+                                             {"role": "user", "content": "Return {\"ok\":true}"}],
+                                "max_tokens": 20,
+                                "response_format": {"type": "json_object"}},
+                          timeout=60,
+                      )
+                      body = safe(r.text, openai_key)
+                      print("openai chat", model, "HTTP", r.status_code, body)
+                      if r.status_code == 200:
+                          any_ok = True
+                          openai_chat_ok = True
+                  except Exception as exc:
+                      print("openai chat", model, "network error", type(exc).__name__)
 
           print("ANY_GATEWAY_OK", any_ok)
+          print("OPENAI_CHAT_OK", openai_chat_ok)
           PY
