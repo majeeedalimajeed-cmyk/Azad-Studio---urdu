@@ -1,0 +1,1 @@
+Runtime data directory. The application creates cards, audits, media, snapshots, and the SQLite database here. Generated contents are ignored by git.

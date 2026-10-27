@@ -1,0 +1,32 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+.git-credentials
+*.token
+*.secret
+*_FILE
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Generated data, databases, cards, audits and source snapshots
+data/*
+!data/.gitkeep
+
+# Generated machine-readable scan output; Markdown reports are documentation.
+reports/HOURLY_SCAN.json
+
+# Locally installed vendor packages; install from requirements.txt instead.
+vendor/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.log

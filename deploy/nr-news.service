@@ -1,0 +1,26 @@
+[Unit]
+Description=AZAD STUDIO dry-run service and scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nrnews
+Group=nrnews
+WorkingDirectory=/opt/nr-news
+EnvironmentFile=/etc/nr-news.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/nr-news/venv/bin/python -m nr_news.cli serve
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/nr-news/data /opt/nr-news/reports
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

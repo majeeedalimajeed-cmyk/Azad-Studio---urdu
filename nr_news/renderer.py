@@ -1,0 +1,434 @@
+"""Agent D — deterministic black-and-gold layered card renderer.
+
+The uploaded monogram asset is verified by SHA-256 on every render. Its content is
+cropped from the uniform black background and only proportionally resized;
+the monogram is never redrawn, recoloured or distorted.
+"""
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+from .config import CONFIG
+from .models import EditorialContent
+from .util import iso, json_dumps, redact, sha256_file, sha256_text, utcnow
+
+WIDTH, HEIGHT = 1080, 1350
+BLACK = (5, 5, 6)
+PANEL = (12, 11, 10)
+GOLD = (226, 184, 74)
+GOLD_LIGHT = (255, 231, 151)
+GOLD_DARK = (119, 78, 16)
+RED = (139, 14, 24)
+RED_LIGHT = (190, 24, 35)
+WHITE = (248, 247, 242)
+MUTED = (199, 176, 115)
+DARK_TEXT = (31, 22, 6)
+
+
+class AssetError(RuntimeError):
+    pass
+
+
+class LayoutError(RuntimeError):
+    pass
+
+
+@dataclass
+class RenderedCard:
+    path: str
+    sha256: str
+    width: int
+    height: int
+    page_number: int
+    page_count: int
+    visual_status: str
+    audit: dict[str, Any]
+
+
+def font(path: Path, size: int, weight: str = "Regular") -> ImageFont.FreeTypeFont:
+    f = ImageFont.truetype(str(path), size)
+    try:
+        f.set_variation_by_name(weight)
+    except Exception:
+        pass
+    return f
+
+
+def verify_logo() -> str:
+    if not CONFIG.logo_path.exists():
+        raise AssetError("Exact supplied monogram asset is unavailable. Please upload the original assets.png again.")
+    digest = sha256_file(CONFIG.logo_path)
+    if digest != CONFIG.logo_sha256:
+        raise AssetError("Exact supplied monogram asset failed SHA-256 verification. A substitute will not be used.")
+    return digest
+
+
+def load_logo() -> Image.Image:
+    verify_logo()
+    with Image.open(CONFIG.logo_path) as src:
+        im = src.convert("RGBA")
+    # Locate all non-black pixels; crop only the uniform black margin.
+    rgb = im.convert("RGB")
+    mask = Image.new("L", rgb.size, 0)
+    pixels = rgb.load()
+    mask_pixels = mask.load()
+    for y in range(rgb.height):
+        for x in range(rgb.width):
+            r, g, b = pixels[x, y]
+            if max(r, g, b) > 10:
+                mask_pixels[x, y] = 255
+    bbox = mask.getbbox()
+    if not bbox:
+        raise AssetError("Supplied monogram asset contains no visible monogram.")
+    pad = 14
+    bbox = (max(0, bbox[0] - pad), max(0, bbox[1] - pad),
+            min(im.width, bbox[2] + pad), min(im.height, bbox[3] + pad))
+    return im.crop(bbox)
+
+
+def proportional_logo(logo: Image.Image, target_height: int) -> Image.Image:
+    ratio = target_height / logo.height
+    width = round(logo.width * ratio)
+    return logo.resize((width, target_height), Image.Resampling.LANCZOS)
+
+
+def paste_logo(canvas: Image.Image, logo: Image.Image, center_x: int, top: int, height: int) -> tuple[int, int, int, int]:
+    scaled = proportional_logo(logo, height)
+    x = center_x - scaled.width // 2
+    canvas.paste(scaled, (x, top), scaled)
+    return (x, top, x + scaled.width, top + scaled.height)
+
+
+def gradient(size: tuple[int, int], top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
+    w, h = size
+    im = Image.new("RGB", (w, h))
+    d = ImageDraw.Draw(im)
+    for y in range(h):
+        t = y / max(1, h - 1)
+        color = tuple(round(top[i] * (1 - t) + bottom[i] * t) for i in range(3))
+        d.line((0, y, w, y), fill=color)
+    return im
+
+
+def angled_banner(canvas: Image.Image, box: tuple[int, int, int, int], color: Image.Image,
+                  border: tuple[int, int, int] = GOLD_LIGHT) -> None:
+    x0, y0, x1, y1 = box
+    notch = 28
+    poly = [(x0, y0), (x1 - notch, y0), (x1, y1), (x0 + notch, y1)]
+    mask = Image.new("L", canvas.size, 0)
+    md = ImageDraw.Draw(mask)
+    md.polygon(poly, fill=255)
+    canvas.paste(color, (x0, y0), mask.crop((x0, y0, x1, y1)))
+    d = ImageDraw.Draw(canvas)
+    d.line(poly + [poly[0]], fill=border, width=3, joint="curve")
+
+
+def isolate_latin(text: str) -> str:
+    # First-strong-isolate / pop-directional-isolate keeps acronyms and email
+    # addresses readable inside an RTL paragraph without changing the text file.
+    return re.sub(r"([A-Za-z][A-Za-z0-9@._:-]*)", "\u2068\\1\u2069", text)
+
+
+class CardRenderer:
+    def __init__(self, config=CONFIG):
+        self.config = config
+        self.logo_digest = verify_logo()
+
+    def _font(self, urdu: bool, size: int, weight: str = "Regular") -> ImageFont.FreeTypeFont:
+        path = self.config.urdu_font_path if urdu else self.config.latin_font_path
+        if not path.exists():
+            raise AssetError(f"Required font missing: {path.name}")
+        return font(path, size, weight)
+
+    def _text_length(self, draw: ImageDraw.ImageDraw, text: str, fnt: ImageFont.FreeTypeFont,
+                     rtl: bool = False) -> float:
+        kwargs = {"font": fnt}
+        if rtl:
+            kwargs.update(direction="rtl", language="ur")
+        return draw.textlength(isolate_latin(text) if rtl else text, **kwargs)
+
+    def wrap(self, draw: ImageDraw.ImageDraw, text: str, fnt: ImageFont.FreeTypeFont,
+             max_width: int, rtl: bool = False) -> list[str]:
+        words = text.split()
+        if not words:
+            return [""]
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            trial = current + " " + word
+            if self._text_length(draw, trial, fnt, rtl) <= max_width:
+                current = trial
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        # Very long unbroken strings are split by pixels to prevent clipping.
+        result: list[str] = []
+        for line in lines:
+            if self._text_length(draw, line, fnt, rtl) <= max_width:
+                result.append(line)
+                continue
+            chunk = ""
+            for ch in line:
+                if self._text_length(draw, chunk + ch, fnt, rtl) <= max_width:
+                    chunk += ch
+                else:
+                    result.append(chunk)
+                    chunk = ch
+            if chunk:
+                result.append(chunk)
+        return result
+
+    def measure_bullets(self, draw: ImageDraw.ImageDraw, bullets: list[str], size: int,
+                        max_width: int, rtl: bool, line_height_factor: float) -> tuple[list[list[str]], int, int]:
+        fnt = self._font(rtl, size, "SemiBold" if rtl else "Medium")
+        line_height = max(32, round(size * line_height_factor))
+        groups = [self.wrap(draw, b, fnt, max_width, rtl) for b in bullets]
+        total = sum(len(g) * line_height + 22 for g in groups)
+        return groups, total, line_height
+
+    def fit_bullets(self, draw: ImageDraw.ImageDraw, bullets: list[str], max_width: int,
+                    max_height: int, rtl: bool) -> tuple[list[list[str]], ImageFont.FreeTypeFont, int]:
+        sizes = range(40, 25, -2) if rtl else range(36, 24, -2)
+        factor = 1.72 if rtl else 1.34
+        best = None
+        for size in sizes:
+            groups, total, line_height = self.measure_bullets(draw, bullets, size, max_width, rtl, factor)
+            best = (groups, self._font(rtl, size, "SemiBold" if rtl else "Medium"), line_height, total)
+            if total <= max_height:
+                return best[:3]
+        raise LayoutError(f"Bullets do not fit ({best[3]}px > {max_height}px) at minimum readable size")
+
+    def _draw_background(self, canvas: Image.Image, date_text: str) -> None:
+        d = ImageDraw.Draw(canvas)
+        d.rectangle((0, 0, WIDTH, HEIGHT), fill=BLACK)
+        # Subtle central panel and border.
+        d.rounded_rectangle((18, 18, WIDTH - 18, HEIGHT - 18), radius=30, outline=GOLD_DARK, width=5)
+        d.rounded_rectangle((28, 28, WIDTH - 28, HEIGHT - 28), radius=26, outline=(52, 39, 13), width=2)
+        # Programmatic abstract dotted globe — no third-party artwork.
+        cx, cy, radius = 850, 112, 92
+        for ring in range(1, 6):
+            ry = radius * ring / 5
+            for i in range(8, 26):
+                angle = 2 * math.pi * i / 32
+                x = cx + radius * math.cos(angle)
+                y = cy + ry * math.sin(angle)
+                if 760 < x < 1010 and 35 < y < 190:
+                    d.ellipse((x - 1, y - 1, x + 1, y + 1), fill=(69, 51, 16))
+        for i in range(5):
+            d.line((35 + 2 * i, 32 + 52 * i, 105 + 2 * i, 30 + 52 * i), fill=GOLD_LIGHT if i == 0 else GOLD_DARK, width=5 if i == 0 else 2)
+        # Corner accents.
+        for sx in (0, 1):
+            x0 = 20 if sx == 0 else WIDTH - 145
+            d.line((x0, HEIGHT - 120, x0 + 115, HEIGHT - 20), fill=GOLD_DARK, width=16)
+            d.line((x0, HEIGHT - 145, x0 + 115, HEIGHT - 34), fill=(58, 41, 10), width=5)
+        # Date badge.
+        df = self._font(False, 21, "SemiBold")
+        tw = d.textlength(date_text, font=df)
+        x0 = WIDTH - 40 - tw - 46
+        d.rounded_rectangle((x0, 44, WIDTH - 40, 92), radius=14, fill=(15, 13, 9), outline=GOLD_DARK, width=2)
+        d.text((WIDTH - 54, 58), date_text, font=df, fill=GOLD_LIGHT, anchor="ra")
+        # Small calendar glyph.
+        d.rounded_rectangle((x0 + 8, 53, x0 + 32, 79), radius=4, outline=GOLD_LIGHT, width=2)
+        d.line((x0 + 8, 61, x0 + 32, 61), fill=GOLD_LIGHT, width=2)
+
+    def _draw_headline(self, canvas: Image.Image, text: str, rtl: bool, y: int) -> None:
+        d = ImageDraw.Draw(canvas)
+        box = (38, y, WIDTH - 38, y + 104)
+        angled_banner(canvas, box, gradient((box[2] - box[0], box[3] - box[1]), GOLD_LIGHT, GOLD))
+        sizes = [44, 41, 38, 35, 32] if rtl else [46, 43, 40, 37, 34, 31]
+        max_width = 900
+        for size in sizes:
+            f = self._font(rtl, size, "Bold")
+            lines = self.wrap(d, text, f, max_width, rtl)
+            if len(lines) <= 2 and all(self._text_length(d, line, f, rtl) <= max_width for line in lines):
+                line_h = size * (1.65 if rtl else 1.13)
+                total_h = len(lines) * line_h
+                start_y = y + (104 - total_h) / 2 + (-10 if rtl else 0)
+                for idx, line in enumerate(lines):
+                    x = WIDTH - 70 if rtl else 75
+                    d.text((x, start_y + idx * line_h), isolate_latin(line) if rtl else line,
+                           font=f, fill=DARK_TEXT, anchor="ra" if rtl else "la",
+                           **({"direction": "rtl", "language": "ur"} if rtl else {}))
+                return
+        raise LayoutError("Headline does not fit the gold banner")
+
+    def _draw_bullets(self, canvas: Image.Image, bullets: list[str], rtl: bool, y0: int,
+                      max_height: int, max_width: int, x_text: int, bullet_x: int) -> int:
+        d = ImageDraw.Draw(canvas)
+        groups, fnt, line_height = self.fit_bullets(d, bullets, max_width, max_height, rtl)
+        y = y0
+        for lines in groups:
+            d.ellipse((bullet_x - 9, y + 9, bullet_x + 9, y + 27), fill=GOLD)
+            for line in lines:
+                d.text((x_text, y), isolate_latin(line) if rtl else line, font=fnt, fill=WHITE,
+                       anchor="ra" if rtl else "la", stroke_width=0,
+                       **({"direction": "rtl", "language": "ur"} if rtl else {}))
+                y += line_height
+            y += 22
+        return y
+
+    def _draw_photo(self, canvas: Image.Image, media: dict[str, Any], box: tuple[int, int, int, int]) -> None:
+        x0, y0, x1, y1 = box
+        with Image.open(media["local_path"]) as src:
+            im = ImageOps.fit(src.convert("RGB"), (x1 - x0, y1 - y0), method=Image.Resampling.LANCZOS)
+        canvas.paste(im, (x0, y0))
+        d = ImageDraw.Draw(canvas)
+        d.rectangle(box, outline=GOLD, width=4)
+        credit = f"Photo: {media['credit']} | {media['license_ref']}"
+        cf = self._font(False, 15, "Medium")
+        # Clamp credit to panel width and draw on a dark strip.
+        while d.textlength(credit, font=cf) > (x1 - x0 - 16) and len(credit) > 20:
+            credit = credit[:-5] + "…"
+        d.rectangle((x0, y1 - 28, x1, y1), fill=(0, 0, 0))
+        d.text((x0 + 8, y1 - 25), credit, font=cf, fill=GOLD_LIGHT)
+
+    def draw_card(self, content: EditorialContent, output_path: Path, *, media: dict[str, Any] | None = None,
+                  bullet_slice: tuple[int, int] | None = None, page_number: int = 1,
+                  page_count: int = 1) -> RenderedCard:
+        verify_logo()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        urdu_bullets = list(content.urdu_bullets)
+        roman_bullets = list(content.roman_bullets)
+        if bullet_slice:
+            a, b = bullet_slice
+            urdu_bullets, roman_bullets = urdu_bullets[a:b], roman_bullets[a:b]
+        if not (3 <= len(urdu_bullets) == len(roman_bullets) <= 5):
+            raise LayoutError("Each card requires 3-5 corresponding Urdu and Roman Urdu bullets")
+
+        pub_dt = datetime.fromisoformat((content.publication_time or iso()).replace("Z", "+00:00")).astimezone(ZoneInfo("Asia/Kolkata"))
+        date_text = pub_dt.strftime("%d %b %Y  |  %I:%M %p IST").upper()
+        canvas = Image.new("RGB", (WIDTH, HEIGHT), BLACK)
+        self._draw_background(canvas, date_text)
+        d = ImageDraw.Draw(canvas)
+
+        logo = load_logo()
+        top_logo_box = paste_logo(canvas, logo, 120, 42, 104)
+        brand_font = self._font(False, 19, "SemiBold")
+        d.text((190, 128), "AZAD STUDIO", font=brand_font, fill=MUTED, anchor="la")
+
+        # Main heading must remain exactly LATEST NEWS.
+        red_box = (35, 172, WIDTH - 35, 264)
+        angled_banner(canvas, red_box, gradient((red_box[2] - red_box[0], red_box[3] - red_box[1]), RED_LIGHT, RED), border=GOLD_LIGHT)
+        heading_font = self._font(False, 62, "ExtraBold")
+        d.text((112, 185), "LATEST NEWS", font=heading_font, fill=WHITE, stroke_width=1, stroke_fill=(60, 0, 0))
+        # Megaphone icon, drawn programmatically.
+        d.polygon([(50, 205), (68, 205), (84, 192), (84, 235), (68, 224), (50, 224)], fill=WHITE)
+        d.arc((48, 214, 70, 248), 270, 90, fill=WHITE, width=4)
+
+        self._draw_headline(canvas, content.urdu_headline, True, 290)
+        d.text((WIDTH - 70, 410), "URDU SUMMARY", font=self._font(False, 21, "Bold"),
+               fill=MUTED, anchor="ra")
+
+        # Optional rights-cleared image occupies a reserved panel; it never covers text.
+        urdu_max_width = 900
+        urdu_text_x = WIDTH - 135
+        urdu_bullet_x = 1025
+        if media:
+            self._draw_photo(canvas, media, (585, 432, 1035, 646))
+            urdu_max_width = 490
+            urdu_text_x = 555
+            urdu_bullet_x = 575
+        urdu_end = self._draw_bullets(canvas, urdu_bullets, True, 446, 300, urdu_max_width,
+                                      urdu_text_x, urdu_bullet_x)
+        if urdu_end > 748:
+            raise LayoutError("Urdu bullet area overflowed its reserved region")
+
+        # Separator with diamond.
+        d.line((58, 752, 500, 752), fill=GOLD_DARK, width=3)
+        d.line((580, 752, WIDTH - 58, 752), fill=GOLD_DARK, width=3)
+        diamond = [(540, 735), (558, 752), (540, 769), (522, 752)]
+        d.polygon(diamond, fill=GOLD)
+
+        self._draw_headline(canvas, content.roman_headline, False, 790)
+        d.text((70, 907), "ROMAN URDU", font=self._font(False, 23, "Bold"), fill=MUTED)
+        roman_end = self._draw_bullets(canvas, roman_bullets, False, 946, 294, 900, 135, 88)
+        if roman_end > 1245:
+            raise LayoutError("Roman Urdu bullet area overflowed its reserved region")
+
+        bottom_logo_box = paste_logo(canvas, logo, WIDTH // 2, 1238, 62)
+        footer_font = self._font(False, 15, "Medium")
+        footer = f"VERIFIED REPORT  •  {page_number}/{page_count}  •  AZAD STUDIO"
+        d.text((WIDTH // 2, 1318), footer, font=footer_font, fill=MUTED, anchor="mm")
+
+        canvas.save(output_path, format="PNG", optimize=True)
+        digest = sha256_file(output_path)
+        visual = self.visual_inspection(output_path, top_logo_box, bottom_logo_box)
+        audit = {
+            "rendered_at": iso(),
+            "logo_asset": str(self.config.logo_path),
+            "logo_sha256": self.logo_digest,
+            "logo_crop": "uniform black margin removed; proportional resize only",
+            "card_sha256": digest,
+            "dimensions": [WIDTH, HEIGHT],
+            "urdu_font": self.config.urdu_font_path.name,
+            "latin_font": self.config.latin_font_path.name,
+            "rtl_engine": "libraqm",
+            "heading": "LATEST NEWS",
+            "page_number": page_number,
+            "page_count": page_count,
+            "media": media,
+            "visual_inspection": visual,
+            "text_hash": sha256_text(json_dumps(content.to_dict())),
+        }
+        audit_path = self.config.audit_dir / (output_path.stem + ".json")
+        audit_path.write_text(json_dumps(audit), encoding="utf-8")
+        return RenderedCard(str(output_path), digest, WIDTH, HEIGHT, page_number, page_count,
+                            "passed" if visual["passed"] else "failed", audit)
+
+    def visual_inspection(self, path: Path, top_box: tuple[int, int, int, int],
+                          bottom_box: tuple[int, int, int, int]) -> dict[str, Any]:
+        with Image.open(path) as im:
+            size = im.size
+            rgb = im.convert("RGB")
+        checks = {
+            "dimensions": size == (WIDTH, HEIGHT),
+            "file_nonempty": path.stat().st_size > 50_000,
+            "exact_logo_asset": sha256_file(self.config.logo_path) == self.logo_digest,
+            "logo_top_pixels": _gold_pixel_count(rgb, top_box) > 100,
+            "logo_bottom_pixels": _gold_pixel_count(rgb, bottom_box) > 60,
+        }
+        return {"passed": all(checks.values()), "checks": checks}
+
+    def render_cards(self, content: EditorialContent, stem: str, *,
+                     media: dict[str, Any] | None = None) -> list[RenderedCard]:
+        """Render one card, or same-template continuation cards if copy overflows."""
+        n = len(content.urdu_bullets)
+        path = self.config.card_dir / f"{stem}-1.png"
+        try:
+            return [self.draw_card(content, path, media=media)]
+        except LayoutError as exc:
+            if n < 4:
+                raise
+            # Continuation cards preserve paired Urdu/Roman bullets and repeat the
+            # same template, headline and exact supplied monogram. No facts are changed.
+            groups = [(0, 3), (max(0, n - 3), n)]
+            if groups[0] == groups[1]:
+                groups = groups[:1]
+            page_count = len(groups)
+            cards: list[RenderedCard] = []
+            for idx, (a, b) in enumerate(groups, 1):
+                card_path = self.config.card_dir / f"{stem}-{idx}.png"
+                cards.append(self.draw_card(content, card_path, media=media,
+                                            bullet_slice=(a, b), page_number=idx, page_count=page_count))
+            if not cards:
+                raise exc
+            return cards
+
+
+def _gold_pixel_count(im: Image.Image, box: tuple[int, int, int, int]) -> int:
+    crop = im.crop(box)
+    count = 0
+    pixels = crop.get_flattened_data() if hasattr(crop, "get_flattened_data") else crop.getdata()
+    for r, g, b in pixels:
+        if r > 120 and g > 75 and b < 130 and r > b + 35:
+            count += 1
+    return count
