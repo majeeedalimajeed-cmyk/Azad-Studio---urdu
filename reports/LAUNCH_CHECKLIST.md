@@ -60,7 +60,7 @@ Because of blocker 2, the hourly workflow will not invent or publish unverified 
 | LLM gateway | HOLD | Grok key invalid; OpenAI key has no credits. |
 | Exact supplied monogram / fonts | PASS | `check-assets` passes. |
 | Offline unit/integration tests | PASS | `23 passed`. |
-| Two-photo / Pixabay integration | PARTIAL | Offline layout and rights tests pass; `verify-pixabay.yml` must be run once with the repository secret to confirm the live API and upload a real two-photo demo card. |
+| Two-photo / Pixabay integration | PARTIAL | Offline layout and rights tests pass in local commit `dada7bf`; synthetic two-photo layout preview at `data/cards/two-photo-layout-demo-1.png` passed visual inspection. Push and `verify-pixabay.yml` are pending because the GitHub PAT is no longer persisted in the workspace. |
 | GitHub Actions workflows | PARTIAL | CI, identity (pre-expiry), container, hourly dry-run, public test post, and LLM verification all ran; current hourly auto run is blocked by token expiry. Pixabay demo workflow is ready for dispatch. |
 | Direct source access | PARTIAL | Munsif, Etemaad, and The Wire work. Indian Express returns CloudFront 403 and uses a non-publishable snapshot only. |
 | Human review workflow | READY | Review queue and CLI/API approval exist; auto-approval only applies to verified editorials under the explicit auto-post flags. |
