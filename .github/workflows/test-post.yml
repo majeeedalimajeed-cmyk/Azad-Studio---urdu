@@ -32,6 +32,8 @@ jobs:
       NR_LLM_MODEL: ${{ vars.NR_LLM_MODEL || 'grok-4.7' }}
       NR_ROMAN_URDU_MODEL: ${{ vars.NR_ROMAN_URDU_MODEL || 'grok-4.7' }}
       NR_VALIDATOR_MODEL: ${{ vars.NR_VALIDATOR_MODEL || 'grok-4.6' }}
+      NR_PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+      NR_PIXABAY_ENABLED: ${{ vars.NR_PIXABAY_ENABLED || 'true' }}
     steps:
       - uses: actions/checkout@v4
 

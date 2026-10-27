@@ -145,6 +145,21 @@ class Config:
     facebook_page_token: str | None = field(default_factory=lambda: _first_secret(
         "NR_FB_PAGE_ACCESS_TOKEN", "FB_PAGE_ACCESS_TOKEN"))
 
+    # Pixabay Content License photos. The key is read from a secret or *_FILE
+    # path; downloaded files and sanitized API responses are cached locally.
+    pixabay_api_key: str | None = field(default_factory=lambda: _first_secret(
+        "NR_PIXABAY_API_KEY", "PIXABAY_API_KEY"))
+    pixabay_api_base: str = field(default_factory=lambda: (
+        os.getenv("NR_PIXABAY_API_BASE", "https://pixabay.com/api/").rstrip("/") + "/"))
+    pixabay_enabled: bool = field(default_factory=lambda: _bool("NR_PIXABAY_ENABLED", True))
+    pixabay_per_page: int = int(os.getenv("NR_PIXABAY_PER_PAGE", "3"))
+    pixabay_min_width: int = int(os.getenv("NR_PIXABAY_MIN_WIDTH", "800"))
+    pixabay_min_height: int = int(os.getenv("NR_PIXABAY_MIN_HEIGHT", "600"))
+    pixabay_cache_ttl: int = int(os.getenv("NR_PIXABAY_CACHE_TTL", "86400"))
+    pixabay_license_ref: str = "https://pixabay.com/service/terms/"
+    pixabay_source_name: str = "Pixabay"
+    max_photos_per_card: int = int(os.getenv("NR_MAX_PHOTOS_PER_CARD", "2"))
+
     # Source endpoints. These are public/permitted feeds or public pages.
     # Etemaad's /robots.txt is an HTML page containing <meta name=robots
     # content="index,follow">; that host is explicitly allowed to use the
@@ -186,6 +201,7 @@ class Config:
         values = [
             self.llm_api_key, self.facebook_user_token,
             self.facebook_page_token, self.admin_token,
+            self.pixabay_api_key,
         ]
         return tuple(v for v in values if v)
 

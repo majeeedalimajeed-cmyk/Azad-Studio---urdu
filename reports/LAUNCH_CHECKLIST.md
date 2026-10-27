@@ -17,7 +17,8 @@ The textual brand is AZAD STUDIO; the supplied NR monogram and layout remain unc
   - Card: `data/cards/2026-10-27-4ee3e37504ab-1.png`
   - Evidence: `reports/TEST_POST_RESULT.md`, workflow run `40555660776`.
 - Exact supplied monogram SHA-256 `d0b02c4e7f31f4f58d1e48c08fd3c8d6668bcbbe9e15ef0652a6ff584ede2b3d` verified; 1080×1350 RTL Urdu / LTR Roman Urdu card passed visual inspection.
-- Local tests: `20 passed`. `check-assets` passes with `raqm_available:true`.
+- Local tests: `23 passed`. `check-assets` passes with `raqm_available:true`.
+- Two-photo card integration is implemented: source-supplied rights-cleared photos first, then relevant safe-search Pixabay Content License photos downloaded locally, credited, cached, and audited. Compact bullet layout keeps the two news-image boxes readable; a text-led card remains the fallback. `verify-pixabay.yml` renders a non-published demo without printing the key.
 - Stop mechanism: `deploy/STOP_AUTO_POSTING.md` and `deploy/toggle_auto_posting.py --stop`. Setting `NR_AUTO_POST_ENABLED=false` (and `NR_PUBLISH_ENABLED=false`) stops new public posts.
 
 ## Current blockers — action required
@@ -40,13 +41,14 @@ Because of blocker 2, the hourly workflow will not invent or publish unverified 
 | 5 | Urdu summaries preserve original facts | PASS | Bilingual fixture, fact inventory, entity/number consistency checks. No complete article text is reproduced. |
 | 6 | Roman Urdu matches approved Urdu | PASS | Agent C receives only approved Urdu; independent reviewer plus deterministic checks preserve names, dates, figures and uncertainty. |
 | 7 | Exact supplied monogram appears correctly | PASS | SHA-256-gated asset, proportional black-margin crop only, exact top/bottom placement, visual inspection. |
-| 8 | Card layout is readable and consistent | PASS | Final live card at `data/cards/2026-10-27-4ee3e37504ab-1.png`; RTL/LTR rendering with Noto fonts and libraqm. |
+| 8 | Card layout is readable and consistent | PASS | Final live card at `data/cards/2026-10-27-4ee3e37504ab-1.png`; RTL/LTR rendering with Noto fonts and libraqm. Two-photo compact layout passed visual inspection with `photo_1_pixels` and `photo_2_pixels` checks. |
 | 9 | Duplicate stories are blocked | PASS | Canonical URL, content hash, cluster similarity, idempotency keys, and regression tests. |
 | 10 | Empty hourly runs publish nothing | PASS | Empty-scan test asserts zero cards, captions, and publish attempts. |
 | 11 | Breaking-news verification starts promptly | PASS | 5-minute breaking scheduler and fresh-candidate priority job test. |
 | 12 | Facebook publishing targets only the correct Page | PASS (pre-expiry) | Graph API confirmed Page ID `1383450338187017`, name `Azad Studio `, required permissions and tasks. Re-verify after token refresh. |
 | 13 | API results, errors, retries are recorded | PASS | SQLite `api_events`, `publish_attempts`, `jobs`, and source outage logging. Success requires an API `post_id`. |
 | 14 | Operator-approved test post | PASS | Run `40555660776`; `reports/TEST_POST_RESULT.md`; Graph API `post_id` confirmed. |
+| 15 | Two relevant rights-cleared photos | PASS (offline) | Two-photo renderer/audit tests, Pixabay query tests, and mock two-photo media selection pass. Live Pixabay API demo is validated separately by `verify-pixabay.yml`; no key is printed or hotlinked. |
 
 ## Operational status
 
@@ -57,8 +59,9 @@ Because of blocker 2, the hourly workflow will not invent or publish unverified 
 | Facebook tokens | HOLD | Both expired; replace with long-lived tokens. |
 | LLM gateway | HOLD | Grok key invalid; OpenAI key has no credits. |
 | Exact supplied monogram / fonts | PASS | `check-assets` passes. |
-| Offline unit/integration tests | PASS | `20 passed`. |
-| GitHub Actions workflows | PARTIAL | CI, identity (pre-expiry), container, hourly dry-run, public test post, and LLM verification all ran; current hourly auto run is blocked by token expiry. |
+| Offline unit/integration tests | PASS | `23 passed`. |
+| Two-photo / Pixabay integration | PARTIAL | Offline layout and rights tests pass; `verify-pixabay.yml` must be run once with the repository secret to confirm the live API and upload a real two-photo demo card. |
+| GitHub Actions workflows | PARTIAL | CI, identity (pre-expiry), container, hourly dry-run, public test post, and LLM verification all ran; current hourly auto run is blocked by token expiry. Pixabay demo workflow is ready for dispatch. |
 | Direct source access | PARTIAL | Munsif, Etemaad, and The Wire work. Indian Express returns CloudFront 403 and uses a non-publishable snapshot only. |
 | Human review workflow | READY | Review queue and CLI/API approval exist; auto-approval only applies to verified editorials under the explicit auto-post flags. |
 | 24/7 host deployment | READY | Dashboard preview runs on port 8000; Dockerfile, Compose, systemd unit, and `.env.example` are included. |
@@ -67,10 +70,11 @@ Because of blocker 2, the hourly workflow will not invent or publish unverified 
 
 1. Replace `FB_PAGE_ACCESS_TOKEN` with a long-lived Page token (and refresh `FB_USER_ACCESS_TOKEN` if available).
 2. Provide a working LLM gateway: valid `GROK_API_KEY`, OpenAI credits, or another OpenAI-compatible base/model/key.
-3. Re-run `verify-facebook.yml` and `verify-llm.yml`; both must succeed.
-4. Re-run `hourly-newsroom.yml`; confirm no duplicate of the existing test post and that any new post has a fresh verified source and Graph API `post_id`.
-5. Rotate any credentials that were exposed during setup.
-6. To stop continuous posting, run `python3 deploy/toggle_auto_posting.py --stop` or set `NR_AUTO_POST_ENABLED=false` manually.
+3. Run `verify-pixabay.yml`; inspect the two-photo demo card and credits. It does not publish.
+4. Re-run `verify-facebook.yml` and `verify-llm.yml`; both must succeed.
+5. Re-run `hourly-newsroom.yml`; confirm no duplicate of the existing test post and that any new post has a fresh verified source and Graph API `post_id`.
+6. Rotate any credentials that were exposed during setup.
+7. To stop continuous posting, run `python3 deploy/toggle_auto_posting.py --stop` or set `NR_AUTO_POST_ENABLED=false` manually.
 
 ## Validated / relevant GitHub Actions runs
 

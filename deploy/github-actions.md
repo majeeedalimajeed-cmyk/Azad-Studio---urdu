@@ -11,6 +11,7 @@ This repository uses **repository secrets** for credentials and **repository var
 | `FB_PAGE_ID` | API-confirmed Page ID from `/me/accounts` | `NR_FB_PAGE_ID` |
 | `GROK_API_KEY` | xAI API key | `NR_LLM_API_KEY` |
 | `OPENAI_API_KEY` | Optional fallback key | `NR_LLM_API_KEY` fallback |
+| `PIXABAY_API_KEY` | Pixabay API key | `NR_PIXABAY_API_KEY` |
 
 The long-lived Page token belongs in `FB_PAGE_ACCESS_TOKEN`. `FB_USER_ACCESS_TOKEN` should be a long-lived user token for the initial `/me/accounts` identity check and feed reconciliation; GitHub secret values are write-only, so do not paste them into chat, source, or logs. If the user token expires, `FacebookGraphClient.verify_identity()` falls back to the Page token, configured Page ID, exact expected name, and required Page tasks/permissions, so a fresh cache can bootstrap from a valid Page token alone. Refresh `FB_USER_ACCESS_TOKEN` when convenient to restore full `/me/accounts` and feed-reconciliation coverage.
 
@@ -25,6 +26,7 @@ The long-lived Page token belongs in `FB_PAGE_ACCESS_TOKEN`. `FB_USER_ACCESS_TOK
 | `NR_LLM_MODEL` | `grok-4.7` | Agent A Urdu model. |
 | `NR_ROMAN_URDU_MODEL` | `grok-4.7` | Agent C Roman Urdu model. |
 | `NR_VALIDATOR_MODEL` | `grok-4.6` | Independent reviewer model. |
+| `NR_PIXABAY_ENABLED` | `true` / `false` | Enables Pixabay fallback photos when no source photo is cleared. |
 | `NR_DRY_RUN` | `true` / `false` | Dry-run switch. |
 | `NR_PUBLISH_ENABLED` | `false` / `true` | Public publishing switch. |
 | `NR_PUBLISH_SAFETY_OK` | `false` / `true` | Explicit safety interlock. |
@@ -40,6 +42,7 @@ For live auto posting, set `NR_DRY_RUN=false`, `NR_PUBLISH_ENABLED=true`, `NR_PU
 - **CI — tests and dry-run card**: push/PR/manual. Runs `check-assets`, `pytest`, and a verified fixture render. Uploads the PNG card as an artifact.
 - **Verify Facebook Page identity**: manual. Maps secrets to env vars and runs `python -m nr_news.cli verify-facebook`. It does not post.
 - **Verify LLM gateway**: manual. Checks the configured model gateway and model IDs without printing keys.
+- **Verify Pixabay two-photo demo**: manual. Checks the Pixabay key without printing it, renders a non-published two-photo card using safe-search licensed photos, and uploads the card plus `reports/PIXABAY_DEMO.md` as an artifact.
 - **Operator-approved public test post**: manual. Runs the verified regional fixture through the full live publishing path with explicit operator approval, confirms the post through the Graph API, records `facebook_test_post_passed` in the durable SQLite cache, and writes `reports/TEST_POST_RESULT.md`.
 - **Hourly newsroom scan**: hourly/manual. Restores the SQLite cache, verifies Page identity, runs the hourly scan and queued verification jobs, generates a report, and uploads cards/audits/reports. With the auto-post variables enabled it publishes only verified, fresh, non-crime, deduplicated editorials; otherwise it remains a dry run.
 - **Build container image**: push/manual. Builds the Dockerfile and pushes to `ghcr.io/<owner>/azad-studio-urdu`.
@@ -70,6 +73,9 @@ NR_LLM_API_BASE=https://api.x.ai/v1
 NR_LLM_MODEL=grok-4.7
 NR_ROMAN_URDU_MODEL=grok-4.7
 NR_VALIDATOR_MODEL=grok-4.6
+NR_PIXABAY_API_KEY_FILE=/home/user/.config/nr_news/pixabay_api_key.txt
+NR_PIXABAY_ENABLED=true
+NR_MAX_PHOTOS_PER_CARD=2
 NR_DRY_RUN=true
 NR_PUBLISH_ENABLED=false
 NR_PUBLISH_SAFETY_OK=false
@@ -80,3 +86,14 @@ NR_AUTO_POST_ENABLED=false
 ```
 
 Never paste a token into `.env`, a workflow file, an issue, or chat. Rotate any token that has been exposed.
+
+## Restore Git HTTPS authentication
+
+If the workspace snapshot drops `/home/user/.git-credentials` or the `origin` remote, set a PAT with `repo, workflow` scopes in a secret environment variable or 600-mode file, then run:
+
+```bash
+export GITHUB_TOKEN='<token provided through a secret UI>'
+./deploy/setup_git_auth.sh
+```
+
+The script writes only to `/home/user/.git-credentials` (mode 600), restores `origin`, and configures the credential helper. It does not print the token or add it to the repository. Prefer a short-lived fine-grained PAT and rotate any token that was exposed in chat.

@@ -188,20 +188,26 @@ class CardRenderer:
         return result
 
     def measure_bullets(self, draw: ImageDraw.ImageDraw, bullets: list[str], size: int,
-                        max_width: int, rtl: bool, line_height_factor: float) -> tuple[list[list[str]], int, int]:
+                        max_width: int, rtl: bool, line_height_factor: float,
+                        compact: bool = False) -> tuple[list[list[str]], int, int]:
         fnt = self._font(rtl, size, "SemiBold" if rtl else "Medium")
-        line_height = max(32, round(size * line_height_factor))
+        line_height = max(26 if compact else 32, round(size * line_height_factor))
+        gap = 14 if compact else 22
         groups = [self.wrap(draw, b, fnt, max_width, rtl) for b in bullets]
-        total = sum(len(g) * line_height + 22 for g in groups)
+        total = sum(len(g) * line_height + gap for g in groups)
         return groups, total, line_height
 
     def fit_bullets(self, draw: ImageDraw.ImageDraw, bullets: list[str], max_width: int,
-                    max_height: int, rtl: bool) -> tuple[list[list[str]], ImageFont.FreeTypeFont, int]:
-        sizes = range(40, 25, -2) if rtl else range(36, 24, -2)
-        factor = 1.72 if rtl else 1.34
+                    max_height: int, rtl: bool, compact: bool = False) -> tuple[list[list[str]], ImageFont.FreeTypeFont, int]:
+        if compact:
+            sizes = range(36, 19, -2) if rtl else range(34, 19, -2)
+            factor = 1.34 if rtl else 1.18
+        else:
+            sizes = range(40, 25, -2) if rtl else range(36, 24, -2)
+            factor = 1.72 if rtl else 1.34
         best = None
         for size in sizes:
-            groups, total, line_height = self.measure_bullets(draw, bullets, size, max_width, rtl, factor)
+            groups, total, line_height = self.measure_bullets(draw, bullets, size, max_width, rtl, factor, compact)
             best = (groups, self._font(rtl, size, "SemiBold" if rtl else "Medium"), line_height, total)
             if total <= max_height:
                 return best[:3]
@@ -262,18 +268,20 @@ class CardRenderer:
         raise LayoutError("Headline does not fit the gold banner")
 
     def _draw_bullets(self, canvas: Image.Image, bullets: list[str], rtl: bool, y0: int,
-                      max_height: int, max_width: int, x_text: int, bullet_x: int) -> int:
+                      max_height: int, max_width: int, x_text: int, bullet_x: int,
+                      compact: bool = False) -> int:
         d = ImageDraw.Draw(canvas)
-        groups, fnt, line_height = self.fit_bullets(d, bullets, max_width, max_height, rtl)
+        groups, fnt, line_height = self.fit_bullets(d, bullets, max_width, max_height, rtl, compact)
+        gap = 14 if compact else 22
         y = y0
         for lines in groups:
-            d.ellipse((bullet_x - 9, y + 9, bullet_x + 9, y + 27), fill=GOLD)
+            d.ellipse((bullet_x - 9, y + 9, bullet_x + 9, y + 22), fill=GOLD)
             for line in lines:
                 d.text((x_text, y), isolate_latin(line) if rtl else line, font=fnt, fill=WHITE,
                        anchor="ra" if rtl else "la", stroke_width=0,
                        **({"direction": "rtl", "language": "ur"} if rtl else {}))
                 y += line_height
-            y += 22
+            y += gap
         return y
 
     def _draw_photo(self, canvas: Image.Image, media: dict[str, Any], box: tuple[int, int, int, int]) -> None:
@@ -291,10 +299,12 @@ class CardRenderer:
         d.rectangle((x0, y1 - 28, x1, y1), fill=(0, 0, 0))
         d.text((x0 + 8, y1 - 25), credit, font=cf, fill=GOLD_LIGHT)
 
-    def draw_card(self, content: EditorialContent, output_path: Path, *, media: dict[str, Any] | None = None,
+    def draw_card(self, content: EditorialContent, output_path: Path, *,
+                  media: list[dict[str, Any]] | dict[str, Any] | None = None,
                   bullet_slice: tuple[int, int] | None = None, page_number: int = 1,
                   page_count: int = 1) -> RenderedCard:
         verify_logo()
+        photos = normalize_media(media, self.config.max_photos_per_card)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         urdu_bullets = list(content.urdu_bullets)
         roman_bullets = list(content.roman_bullets)
@@ -328,17 +338,23 @@ class CardRenderer:
         d.text((WIDTH - 70, 410), "URDU SUMMARY", font=self._font(False, 21, "Bold"),
                fill=MUTED, anchor="ra")
 
-        # Optional rights-cleared image occupies a reserved panel; it never covers text.
+        # Up to two rights-cleared photos occupy reserved panels, mirroring the
+        # reference card: one beside the Urdu copy, one beside the Roman copy.
+        photo_boxes: list[tuple[int, int, int, int]] = []
+        urdu_photo = photos[0] if photos else None
+        roman_photo = photos[1] if len(photos) > 1 else None
         urdu_max_width = 900
         urdu_text_x = WIDTH - 135
         urdu_bullet_x = 1025
-        if media:
-            self._draw_photo(canvas, media, (585, 432, 1035, 646))
+        if urdu_photo:
+            urdu_box = (585, 432, 1035, 646)
+            self._draw_photo(canvas, urdu_photo, urdu_box)
+            photo_boxes.append(urdu_box)
             urdu_max_width = 490
             urdu_text_x = 555
             urdu_bullet_x = 575
         urdu_end = self._draw_bullets(canvas, urdu_bullets, True, 446, 300, urdu_max_width,
-                                      urdu_text_x, urdu_bullet_x)
+                                      urdu_text_x, urdu_bullet_x, compact=bool(urdu_photo))
         if urdu_end > 748:
             raise LayoutError("Urdu bullet area overflowed its reserved region")
 
@@ -350,7 +366,19 @@ class CardRenderer:
 
         self._draw_headline(canvas, content.roman_headline, False, 790)
         d.text((70, 907), "ROMAN URDU", font=self._font(False, 23, "Bold"), fill=MUTED)
-        roman_end = self._draw_bullets(canvas, roman_bullets, False, 946, 294, 900, 135, 88)
+        roman_max_width = 900
+        roman_text_x = 135
+        roman_bullet_x = 88
+        if roman_photo:
+            roman_box = (585, 930, 1035, 1144)
+            self._draw_photo(canvas, roman_photo, roman_box)
+            photo_boxes.append(roman_box)
+            roman_max_width = 450
+            roman_text_x = 120
+            roman_bullet_x = 88
+        roman_end = self._draw_bullets(canvas, roman_bullets, False, 946, 294,
+                                       roman_max_width, roman_text_x, roman_bullet_x,
+                                       compact=bool(roman_photo))
         if roman_end > 1245:
             raise LayoutError("Roman Urdu bullet area overflowed its reserved region")
 
@@ -361,7 +389,8 @@ class CardRenderer:
 
         canvas.save(output_path, format="PNG", optimize=True)
         digest = sha256_file(output_path)
-        visual = self.visual_inspection(output_path, top_logo_box, bottom_logo_box)
+        visual = self.visual_inspection(output_path, top_logo_box, bottom_logo_box,
+                                        photo_boxes=photo_boxes)
         audit = {
             "rendered_at": iso(),
             "logo_asset": str(self.config.logo_path),
@@ -375,7 +404,10 @@ class CardRenderer:
             "heading": "LATEST NEWS",
             "page_number": page_number,
             "page_count": page_count,
-            "media": media,
+            "media": photos,
+            "media_count": len(photos),
+            "media_credits": [f"{m.get('credit')} | {m.get('license_ref')}" for m in photos],
+            "photo_boxes": photo_boxes,
             "visual_inspection": visual,
             "text_hash": sha256_text(json_dumps(content.to_dict())),
         }
@@ -385,7 +417,8 @@ class CardRenderer:
                             "passed" if visual["passed"] else "failed", audit)
 
     def visual_inspection(self, path: Path, top_box: tuple[int, int, int, int],
-                          bottom_box: tuple[int, int, int, int]) -> dict[str, Any]:
+                          bottom_box: tuple[int, int, int, int],
+                          photo_boxes: list[tuple[int, int, int, int]] | None = None) -> dict[str, Any]:
         with Image.open(path) as im:
             size = im.size
             rgb = im.convert("RGB")
@@ -396,10 +429,12 @@ class CardRenderer:
             "logo_top_pixels": _gold_pixel_count(rgb, top_box) > 100,
             "logo_bottom_pixels": _gold_pixel_count(rgb, bottom_box) > 60,
         }
+        for idx, box in enumerate(photo_boxes or [], 1):
+            checks[f"photo_{idx}_pixels"] = _photo_pixel_count(rgb, box) > 1000
         return {"passed": all(checks.values()), "checks": checks}
 
     def render_cards(self, content: EditorialContent, stem: str, *,
-                     media: dict[str, Any] | None = None) -> list[RenderedCard]:
+                     media: list[dict[str, Any]] | dict[str, Any] | None = None) -> list[RenderedCard]:
         """Render one card, or same-template continuation cards if copy overflows."""
         n = len(content.urdu_bullets)
         path = self.config.card_dir / f"{stem}-1.png"
@@ -430,5 +465,29 @@ def _gold_pixel_count(im: Image.Image, box: tuple[int, int, int, int]) -> int:
     pixels = crop.get_flattened_data() if hasattr(crop, "get_flattened_data") else crop.getdata()
     for r, g, b in pixels:
         if r > 120 and g > 75 and b < 130 and r > b + 35:
+            count += 1
+    return count
+
+
+def normalize_media(media: list[dict[str, Any]] | dict[str, Any] | None,
+                    limit: int = 2) -> list[dict[str, Any]]:
+    """Accept legacy single-media dicts and new two-photo lists."""
+    if not media:
+        return []
+    if isinstance(media, dict):
+        return [media][:limit]
+    if isinstance(media, (list, tuple)):
+        return [m for m in media if isinstance(m, dict)][:limit]
+    return []
+
+
+def _photo_pixel_count(im: Image.Image, box: tuple[int, int, int, int]) -> int:
+    """Count clearly non-background pixels inside a photo panel."""
+    crop = im.crop(box)
+    pixels = crop.get_flattened_data() if hasattr(crop, "get_flattened_data") else crop.getdata()
+    count = 0
+    for r, g, b in pixels:
+        # Exclude near-black card background and strong gold borders/credits.
+        if max(r, g, b) > 45 and not (r > 170 and g > 130 and b < 125):
             count += 1
     return count

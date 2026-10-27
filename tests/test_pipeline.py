@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from nr_news.agents.media import MediaAgent
 from nr_news.agents.publisher import PublishingAgent
 from nr_news.agents.research import ResearchAgent
 from nr_news.agents.translator import TranslationValidator
@@ -15,9 +16,10 @@ from nr_news.agents.verification import VerificationAgent, editorial_exclusion_t
 from nr_news.config import CONFIG, ROOT
 from nr_news.db import Database
 from nr_news.facebook import FacebookGraphClient, GraphAPIError
-from nr_news.models import Candidate, SourceResult
+from nr_news.models import Candidate, EditorialContent, SourceResult
 from nr_news.pipeline import NewsPipeline
-from nr_news.renderer import verify_logo
+from nr_news.pixabay import PixabayClient
+from nr_news.renderer import CardRenderer, verify_logo
 from nr_news.service import PersistentScheduler
 from nr_news.util import iso, utcnow
 
@@ -45,6 +47,8 @@ def temp_config(tmp_path: Path, **overrides):
         "facebook_page_token": None,
         "facebook_user_token": None,
         "expected_page_name": None,
+        "pixabay_api_key": None,
+        "pixabay_enabled": False,
     }
     values.update(overrides)
     cfg = replace(CONFIG, **values)
@@ -434,3 +438,82 @@ def test_publisher_name_not_allowed_on_card(tmp_path):
     result = validator.validate(urdu, roman)
     assert result["ok"] is False
     assert any("Publisher name" in x for x in result["errors"])
+
+
+def _demo_media(tmp_path: Path, n: int) -> dict:
+    import hashlib
+    path = tmp_path / f"photo-{n}.jpg"
+    Image.new("RGB", (900, 600), (30 + n * 40, 60, 90)).save(path, format="JPEG", quality=85)
+    return {
+        "url": f"https://example.invalid/demo-photo-{n}",
+        "credit": f"DEMO / synthetic photo {n}",
+        "license_ref": "Layout preview only — not for publication",
+        "local_path": str(path),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "width": 900,
+        "height": 600,
+        "provider": "demo",
+    }
+
+
+def test_two_photo_card_layout_passes_visual_inspection(tmp_path):
+    cfg = temp_config(tmp_path)
+    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    ed = fixture["editorial"]
+    media = [_demo_media(tmp_path, 1), _demo_media(tmp_path, 2)]
+    content = EditorialContent(
+        urdu_headline=ed["urdu_headline"],
+        urdu_bullets=ed["urdu_bullets"],
+        roman_headline=ed["roman_headline"],
+        roman_bullets=ed["roman_bullets"],
+        verification_notes=ed.get("verification_notes", []),
+        source_urls=ed.get("source_urls", []),
+        publication_time=iso(),
+        media=media,
+    )
+    cards = CardRenderer(cfg).render_cards(content, "two-photo-test", media=content.media)
+    assert cards
+    card = cards[0]
+    assert card.visual_status == "passed"
+    assert card.audit["media_count"] == 2
+    assert card.audit["visual_inspection"]["checks"]["photo_1_pixels"] is True
+    assert card.audit["visual_inspection"]["checks"]["photo_2_pixels"] is True
+
+
+def test_pixabay_query_uses_relevant_story_terms():
+    candidate = sample_candidate(
+        original_headline="Hyderabad government election policy decision",
+        body_excerpt="Telangana cabinet announced a new education policy after the election commission review.",
+        category="government",
+    )
+    query = PixabayClient.build_query(candidate, facts={"locations": ["Hyderabad"], "names": ["TGPSC"]})
+    assert "Hyderabad" in query
+    assert "government" in query.lower()
+    assert "news" not in query.lower().split()
+
+
+def test_media_agent_fills_two_photos_from_pixabay(tmp_path):
+    cfg = temp_config(tmp_path, pixabay_enabled=True, pixabay_api_key="fake-key")
+    db = Database(cfg.db_path)
+    photos = [_demo_media(tmp_path, 1), _demo_media(tmp_path, 2)]
+
+    class FakePixabay:
+        available = True
+
+        @staticmethod
+        def build_query(candidate, **kwargs):
+            return "Hyderabad education exam"
+
+        @staticmethod
+        def search(query):
+            return [{"id": 1}, {"id": 2}]
+
+        @staticmethod
+        def download(hit, query):
+            return photos[hit["id"] - 1]
+
+    agent = MediaAgent(db, config=cfg, pixabay_client=FakePixabay())
+    approved = agent.select_many({"id": "c1"}, query_context={"pixabay_query": "Hyderabad education exam"})
+    assert len(approved) == 2
+    assert {m["provider"] for m in approved} == {"demo"}
+    assert db.query("SELECT COUNT(*) AS n FROM media_assets")[0]["n"] == 2

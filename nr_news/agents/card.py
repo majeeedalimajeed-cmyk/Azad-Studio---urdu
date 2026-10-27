@@ -16,7 +16,8 @@ class CardAgent:
         self.renderer = renderer or CardRenderer(config)
         self.config = config
 
-    def render(self, editorial_id: str, content: EditorialContent, media: dict | None = None) -> list[RenderedCard]:
+    def render(self, editorial_id: str, content: EditorialContent,
+               media: list[dict] | dict | None = None) -> list[RenderedCard]:
         stem = f"{iso()[:10]}-{editorial_id[:12]}"
         cards = self.renderer.render_cards(content, stem, media=media)
         for card in cards:

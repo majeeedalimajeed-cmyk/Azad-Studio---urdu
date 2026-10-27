@@ -1,4 +1,11 @@
-"""Agent E — rights-aware news photographs. Default is a text-led card."""
+"""Agent E — rights-aware news photographs, up to two per card.
+
+Source-supplied images are used only with explicit credit, license, permission
+and a local file. When fewer than two rights-cleared images are supplied, the
+Pixabay Content License provider can add relevant, safe, non-AI photographs.
+If no relevant photograph is available, the renderer uses a clean text-led card
+rather than inventing or hot-linking an image.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,33 +16,34 @@ from PIL import Image
 
 from ..config import CONFIG
 from ..db import Database
-from ..http_client import PoliteHTTPClient
+from ..pixabay import PixabayClient
 from ..util import iso, sha256_file
 
 
 class MediaAgent:
-    def __init__(self, db: Database | None = None, client: PoliteHTTPClient | None = None, config=CONFIG):
+    def __init__(self, db: Database | None = None, client: Any | None = None, config=CONFIG,
+                 pixabay_client: PixabayClient | None = None):
         self.db = db or Database(config.db_path)
-        self.client = client or PoliteHTTPClient(config)
+        self.client = client
         self.config = config
+        self.pixabay = pixabay_client or PixabayClient(self.db, config)
 
-    def select(self, candidate: dict[str, Any], media: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        """Return approved media metadata or None.
-
-        A source image URL alone is never sufficient. The operator must provide a
-        license reference, credit and (where needed) a permission reference.
-        AI-generated images are never accepted as news photographs.
-        """
+    @staticmethod
+    def _as_list(media: Any) -> list[dict[str, Any]]:
         if not media:
-            self.db.insert_api_event("agent_e", "media_select", "skipped",
-                                     "No rights-cleared photograph supplied; text-led card used.",
-                                     details={"candidate_id": candidate.get("id")})
-            return None
+            return []
+        if isinstance(media, dict):
+            return [media]
+        if isinstance(media, (list, tuple)):
+            return [m for m in media if isinstance(m, dict)]
+        return []
+
+    def _approve_one(self, candidate: dict[str, Any], media: dict[str, Any]) -> dict[str, Any] | None:
         required = ("url", "credit", "license_ref", "local_path")
         missing = [k for k in required if not media.get(k)]
         if missing:
             self.db.insert_api_event("agent_e", "media_select", "held",
-                                     "Media rights metadata incomplete; text-led card used.",
+                                     "Media rights metadata incomplete; image skipped.",
                                      details={"missing": missing, "candidate_id": candidate.get("id")})
             return None
         if media.get("ai_generated") is True:
@@ -65,9 +73,15 @@ class MediaAgent:
             "license_ref": media["license_ref"],
             "permission_ref": media.get("permission_ref"),
             "local_path": str(path),
-            "sha256": sha256_file(path),
+            "sha256": media.get("sha256") or sha256_file(path),
             "width": width,
             "height": height,
+            "provider": media.get("provider") or "source",
+            "source_page": media.get("source_page") or media["url"],
+            "source_image_url": media.get("source_image_url") or media["url"],
+            "query": media.get("query"),
+            "tags": media.get("tags"),
+            "pixabay_id": media.get("pixabay_id"),
         }
         self.db.execute(
             "INSERT INTO media_assets(id,url,local_path,credit,license_ref,permission_ref,sha256,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -76,5 +90,65 @@ class MediaAgent:
         )
         self.db.insert_api_event("agent_e", "media_select", "approved",
                                  "Rights-cleared editorial photograph approved.",
-                                 details={"candidate_id": candidate.get("id"), "license_ref": approved["license_ref"]})
+                                 details={"candidate_id": candidate.get("id"),
+                                          "license_ref": approved["license_ref"],
+                                          "provider": approved["provider"]})
+        return approved
+
+    def select(self, candidate: dict[str, Any], media: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """Backwards-compatible single-image selector."""
+        approved = self.select_many(candidate, media, max_photos=1)
+        return approved[0] if approved else None
+
+    def select_many(self, candidate: dict[str, Any], media: Any = None, *,
+                    query_context: dict[str, Any] | None = None,
+                    max_photos: int | None = None) -> list[dict[str, Any]]:
+        """Return up to `max_photos` approved media dicts (default two)."""
+        limit = max(1, int(max_photos or self.config.max_photos_per_card))
+        supplied = self._as_list(media)
+        approved: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def add(item: dict[str, Any] | None) -> None:
+            if not item or len(approved) >= limit:
+                return
+            key = str(item.get("sha256") or item.get("url") or item.get("local_path") or "")
+            if key and key in seen:
+                return
+            if key:
+                seen.add(key)
+            approved.append(item)
+
+        for item in supplied:
+            add(self._approve_one(candidate, item))
+            if len(approved) >= limit:
+                break
+
+        if len(approved) < limit and self.pixabay.available:
+            context = query_context or {}
+            query = context.get("pixabay_query") or self.pixabay.build_query(
+                candidate,
+                urdu=context.get("urdu"),
+                facts=context.get("facts") or (context.get("editorial") or {}).get("facts"),
+            )
+            hits = self.pixabay.search(query)
+            for hit in hits:
+                if len(approved) >= limit:
+                    break
+                downloaded = self.pixabay.download(hit, query)
+                add(self._approve_one(candidate, downloaded) if downloaded else None)
+
+        if not approved:
+            reason = ("No rights-cleared photograph supplied and Pixabay returned no relevant image; "
+                      "text-led card used." if self.pixabay.available else
+                      "No rights-cleared photograph supplied and Pixabay is not configured; text-led card used.")
+            self.db.insert_api_event("agent_e", "media_select_many", "skipped", reason,
+                                     details={"candidate_id": candidate.get("id"),
+                                              "supplied": len(supplied), "approved": 0})
+            return []
+        self.db.insert_api_event("agent_e", "media_select_many", "approved",
+                                 f"{len(approved)} rights-cleared photograph(s) approved for card.",
+                                 details={"candidate_id": candidate.get("id"),
+                                          "supplied": len(supplied), "approved": len(approved),
+                                          "providers": [m.get("provider") for m in approved]})
         return approved

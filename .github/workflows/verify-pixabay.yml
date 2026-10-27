@@ -1,0 +1,60 @@
+name: Verify Pixabay two-photo demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: "Safe-search Pixabay query"
+        required: false
+        default: "Telangana government education exam"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NR_SKIP_DOTENV: "1"
+      NR_DRY_RUN: "true"
+      NR_PUBLISH_ENABLED: "false"
+      NR_PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+      NR_PIXABAY_ENABLED: ${{ vars.NR_PIXABAY_ENABLED || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install RTL runtime dependency
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libraqm0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Verify Pixabay API without printing the key
+        run: python -m nr_news.cli verify-pixabay --query "${{ inputs.query }}"
+
+      - name: Render non-published two-photo demo card
+        run: python -m nr_news.cli pixabay-demo --query "${{ inputs.query }}" --output reports/PIXABAY_DEMO.md
+
+      - name: Write Pixabay demo summary
+        run: |
+          {
+            echo "## AZAD STUDIO Pixabay two-photo demo"
+            cat reports/PIXABAY_DEMO.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload demo card and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixabay-demo-${{ github.run_id }}
+          path: |
+            data/cards/pixabay-demo-*.png
+            data/audit/pixabay-demo-*.json
+            reports/PIXABAY_DEMO.md
+          if-no-files-found: error

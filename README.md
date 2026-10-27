@@ -19,7 +19,7 @@ The supplied gold-on-black monogram from the reference card is used byte-for-byt
 | C — Roman Urdu translator | `nr_news/agents/translator.py` | Separate model role. Receives only the approved Urdu headline, bullets, and verification notes; preserves names, dates, figures, titles, and uncertainty without adding opinion. |
 | C-check — independent reviewer | same module, separate configured model | Compares Urdu and Roman Urdu for entity, numeric, and uncertainty drift. Disagreements are held. |
 | D — Card rendering | `nr_news/agents/card.py`, `nr_news/renderer.py` | Deterministic 1080×1350 black/gold/white card with exact `LATEST NEWS` heading, IST date/time, RTL Urdu, LTR Roman Urdu, exact supplied monogram top and bottom, text-led fallback, and programmatic overflow/visual checks. |
-| E — Media rights | `nr_news/agents/media.py` | Rejects source images without explicit credit/license/permission. Never presents AI-generated imagery as a real news photograph. Produces a text-led card when no authentic cleared photo exists. |
+| E — Media rights | `nr_news/agents/media.py`, `nr_news/pixabay.py` | Uses up to two rights-cleared photos per card: source-supplied photos with credit/license/permission first, then relevant Pixabay Content License stock photos. Rejects source images without explicit rights. Never presents AI-generated imagery as a real news photograph. Produces a clean text-led card when no relevant cleared photo exists. |
 | Publisher | `nr_news/agents/publisher.py`, `nr_news/facebook.py` | Official Meta Graph API v26.0 Page photo publishing only. Records attempts, post IDs, timestamps, captions, source URLs, API errors, and retries. Never claims success without an API confirmation. |
 | Optional video | `nr_news/agents/video.py` | Generates scripts, subtitles, and storyboards for 1080×1920 Shorts/Reels. It does not generate audio/video without additional TTS/video tooling and never blocks card publishing. |
 
@@ -150,6 +150,12 @@ sudo systemctl enable --now nr-news
 
 Use a real always-on host, reverse proxy/TLS, log rotation, database backups, secret rotation, and uptime alerting. Keep the container or service in dry run until the launch checklist passes.
 
+### Two-photo cards and Pixabay
+
+New cards support the two `NEWS IMAGE` boxes from the approved reference design: one beside the Urdu bullets and one beside the Roman Urdu bullets. The renderer uses compact bullet sizing when photos are present, credits each photo on the card, and records photo boxes, credits, licenses, and hashes in the card audit. Source-supplied photos are preferred only when the source provides explicit credit, license, or permission and a local file. Otherwise `PixabayClient` searches the documented Pixabay API with `safesearch=true`, downloads photos locally, caches sanitized search responses for 24 hours, and stores rights metadata. Pixabay images are topical stock illustrations under the [Pixabay Content License](https://pixabay.com/service/terms/); they are not AI-generated photographs of the specific event, and they are never hotlinked. If no relevant rights-cleared photo is available, the card renders as a clean text-led card.
+
+Run `python3 -m nr_news.cli verify-pixabay` to check the key without printing it, or `python3 -m nr_news.cli pixabay-demo` to render a non-published two-photo demo card and `reports/PIXABAY_DEMO.md`. The `verify-pixabay.yml` workflow runs both in GitHub Actions and uploads the demo card as an artifact. Set `PIXABAY_API_KEY` as a repository secret; workflows map it to `NR_PIXABAY_API_KEY`. Optional `NR_PIXABAY_ENABLED` defaults to true and `NR_MAX_PHOTOS_PER_CARD` defaults to 2.
+
 ### GitHub Actions and repository secrets
 
 The repository includes six workflows in `.github/workflows/` (full mapping: `deploy/github-actions.md`):
@@ -159,6 +165,7 @@ The repository includes six workflows in `.github/workflows/` (full mapping: `de
 - `verify-llm.yml` — manually checks the configured LLM gateway and model IDs without printing keys.
 - `test-post.yml` — manually publishes one operator-approved public test post and confirms it through the Graph API.
 - `hourly-newsroom.yml` — scheduled hourly scan/verification using the durable SQLite cache; publishes only when all auto-post safety variables are enabled, otherwise remains a dry run.
+- `verify-pixabay.yml` — manually verifies the Pixabay key and renders/uploads a non-published two-photo demo card.
 - `container.yml` — builds and pushes the Docker image to GitHub Container Registry.
 
 The CI, identity, hourly scan and container workflows were validated successfully in dry-run mode; see `reports/LAUNCH_CHECKLIST.md` for run links. The public test-post workflow is dispatched only after explicit operator approval. The LLM verification workflow currently shows that `GROK_API_KEY` is rejected by xAI and `OPENAI_API_KEY` has no credits; new AI-generated stories are held for review until a working gateway is provided.
@@ -172,8 +179,9 @@ Required **repository secrets**:
 | `FB_PAGE_ID` | API-confirmed Page ID lookup hint. |
 | `GROK_API_KEY` | xAI key mapped to `NR_LLM_API_KEY` for Agent A/B/C and the reviewer. |
 | `OPENAI_API_KEY` | Optional fallback if the gateway is switched back to OpenAI. |
+| `PIXABAY_API_KEY` | Pixabay API key mapped to `NR_PIXABAY_API_KEY` for safe-search, rights-cleared stock photos. |
 
-Required **repository variables**: `NR_EXPECTED_PAGE_NAME`, `NR_FB_PAGE_ID`, `NR_GRAPH_API_VERSION`, `NR_LLM_API_BASE`, `NR_LLM_MODEL`, `NR_ROMAN_URDU_MODEL`, `NR_VALIDATOR_MODEL`, `NR_DRY_RUN`, `NR_PUBLISH_ENABLED`, `NR_PUBLISH_SAFETY_OK`, `NR_OPERATOR_APPROVED`, `NR_VERIFY_APPROVED`, `NR_AUTO_APPROVE_VERIFIED`, and `NR_AUTO_POST_ENABLED`.
+Required **repository variables**: `NR_EXPECTED_PAGE_NAME`, `NR_FB_PAGE_ID`, `NR_GRAPH_API_VERSION`, `NR_LLM_API_BASE`, `NR_LLM_MODEL`, `NR_ROMAN_URDU_MODEL`, `NR_VALIDATOR_MODEL`, `NR_PIXABAY_ENABLED`, `NR_DRY_RUN`, `NR_PUBLISH_ENABLED`, `NR_PUBLISH_SAFETY_OK`, `NR_OPERATOR_APPROVED`, `NR_VERIFY_APPROVED`, `NR_AUTO_APPROVE_VERIFIED`, and `NR_AUTO_POST_ENABLED`.
 
 To stop continuous posting, set `NR_AUTO_POST_ENABLED=false` and `NR_PUBLISH_ENABLED=false` (and `NR_PUBLISH_SAFETY_OK=false` / `NR_DRY_RUN=true` for a full reset). See `deploy/STOP_AUTO_POSTING.md` and `deploy/toggle_auto_posting.py` for the exact kill-switch procedure.
 
@@ -190,7 +198,7 @@ The Grok gateway is OpenAI-compatible at `https://api.x.ai/v1`; current model ID
 5. Production LLM gateway is configured in GitHub Actions with `GROK_API_KEY`, `grok-4.7`, and reviewer `grok-4.6`; provide a local key file only if local generation is needed.
 6. Verify direct production access to all four sources; Munsif, Etemaad, and The Wire are working, while Indian Express still needs production-host confirmation.
 7. Reconfirm the exact supplied monogram hash and fonts after deployment.
-8. Inspect the final rendered card and run `bootstrap-test-post --i-understand-this-posts-publicly` (or the `test-post.yml` workflow) with explicit operator approval.
+8. Run `verify-pixabay.yml`, inspect the two-photo demo card and credits, then inspect the final production card and run `bootstrap-test-post --i-understand-this-posts-publicly` (or the `test-post.yml` workflow) with explicit operator approval.
 9. Confirm the returned Graph API `post_id` and the post's visible Page location; `reports/TEST_POST_RESULT.md` records the independent Graph API confirmation.
 10. Enable live auto posting only after an operator signs off on the full test post and audit record, then set the continuous auto-post variables. Use `NR_AUTO_POST_ENABLED=false` as the standing stop switch.
 

@@ -155,7 +155,10 @@ class NewsPipeline:
         raw = _json(candidate.get("raw_json"), {})
         source_urls = [candidate["url"]] + official_urls
         source_urls = list(dict.fromkeys(source_urls))
-        media = self.media.select(candidate, raw.get("media"))
+        media_list = self.media.select_many(
+            candidate, raw.get("media"),
+            query_context={"urdu": urdu, "facts": facts, "pixabay_query": raw.get("pixabay_query")},
+        )
         content = EditorialContent(
             urdu_headline=clean_text(urdu["urdu_headline"], 240),
             urdu_bullets=[clean_text(x, 320) for x in urdu["urdu_bullets"]],
@@ -164,7 +167,7 @@ class NewsPipeline:
             verification_notes=notes,
             source_urls=source_urls,
             publication_time=iso(),
-            media=media,
+            media=media_list or None,
         )
         if editorial_exclusion_text(
             content.urdu_headline, " ".join(content.urdu_bullets),
@@ -190,7 +193,7 @@ class NewsPipeline:
             return {"status": "duplicate_editorial", "candidate_id": candidate_id,
                     "editorial_id": editorial_id}
 
-        rendered = self.cards.render(editorial_id, content, media=media)
+        rendered = self.cards.render(editorial_id, content, media=media_list or None)
         publish_results: list[dict[str, Any]] = []
         for card in rendered:
             card_row = self.db.one("SELECT * FROM cards WHERE file_path=? ORDER BY created_at DESC LIMIT 1", (card.path,))
@@ -232,7 +235,8 @@ class NewsPipeline:
         path = self.config.audit_dir / f"editorial-{editorial_id[:12]}.json"
         path.write_text(json_dumps(payload), encoding="utf-8")
 
-    def run_fixture(self, path: Path, *, dry_run: bool = True) -> dict[str, Any]:
+    def run_fixture(self, path: Path, *, dry_run: bool = True,
+                    use_photos: bool = False) -> dict[str, Any]:
         """Render an operator-provided, already-verified bilingual fixture.
 
         This is used for offline launch validation. It never invents news:
@@ -313,6 +317,16 @@ class NewsPipeline:
 
         official_urls = self._official_urls(candidate_row, fixture.get("evidence_urls", []))
         source_urls = list(dict.fromkeys([candidate_row["url"]] + official_urls + editorial.get("source_urls", [])))
+        media_list: list[dict[str, Any]] = []
+        if use_photos:
+            media_list = self.media.select_many(
+                candidate_row, fixture.get("media"),
+                query_context={
+                    "editorial": editorial,
+                    "candidate": candidate_row,
+                    "pixabay_query": fixture.get("pixabay_query"),
+                },
+            )
         content = EditorialContent(
             urdu_headline=editorial["urdu_headline"],
             urdu_bullets=editorial["urdu_bullets"],
@@ -321,7 +335,7 @@ class NewsPipeline:
             verification_notes=editorial.get("verification_notes", []),
             source_urls=source_urls,
             publication_time=editorial.get("publication_time") or iso(),
-            media=None,
+            media=media_list or None,
         )
         status = "approved" if dry_run else "pending_review"
         eid, created_editorial = self.db.insert_editorial(cid, result.cluster_id, content.to_dict(), status=status)
@@ -329,7 +343,7 @@ class NewsPipeline:
             self.db.set_editorial_status(eid, "approved", "dry_run_fixture")
         if not created_editorial:
             return {"status": "duplicate_editorial", "candidate_id": cid, "editorial_id": eid, "cards": []}
-        cards = self.cards.render(eid, content, media=None)
+        cards = self.cards.render(eid, content, media=media_list or None)
         publish_results = []
         for card in cards:
             card_row = self.db.one("SELECT * FROM cards WHERE file_path=? ORDER BY created_at DESC LIMIT 1", (card.path,))
@@ -339,6 +353,7 @@ class NewsPipeline:
             "fixture_path": str(path), "candidate": candidate_row,
             "verification": result.to_dict(), "translation_validation": validation,
             "source_urls": source_urls, "publish_results": publish_results,
+            "media": media_list, "media_count": len(media_list),
         }
         (self.config.audit_dir / f"fixture-{eid[:12]}.json").write_text(json_dumps(audit), encoding="utf-8")
         if self.config.video_enabled and dry_run:
