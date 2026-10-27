@@ -27,6 +27,7 @@ jobs:
 
       - name: Resolve and confirm Page via Graph API
         env:
+          NR_SKIP_DOTENV: "1"
           NR_GRAPH_API_VERSION: ${{ vars.NR_GRAPH_API_VERSION }}
           NR_EXPECTED_PAGE_NAME: ${{ vars.NR_EXPECTED_PAGE_NAME }}
           NR_FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}

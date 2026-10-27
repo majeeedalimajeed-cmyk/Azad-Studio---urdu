@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     dedupe_key TEXT,
     payload_json TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued',
+    priority INTEGER NOT NULL DEFAULT 0,
     run_at TEXT NOT NULL,
     locked_at TEXT,
     started_at TEXT,
@@ -173,7 +174,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     attempts INTEGER NOT NULL DEFAULT 0,
     error TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, priority DESC, run_at);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -206,6 +207,9 @@ class Database:
     def init(self) -> None:
         with self._lock, self.connect() as conn:
             conn.executescript(SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
+            if "priority" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         with self._lock, self.connect() as conn:
@@ -381,7 +385,7 @@ class Database:
         return self.query("SELECT * FROM api_events ORDER BY created_at DESC LIMIT ?", (limit,))
 
     def enqueue_job(self, job_type: str, payload: dict[str, Any], dedupe_key: str | None = None,
-                    delay_seconds: int = 0) -> str | None:
+                    delay_seconds: int = 0, priority: int = 0) -> str | None:
         if dedupe_key:
             row = self.one("SELECT id FROM jobs WHERE dedupe_key=? AND status IN ('queued','running')", (dedupe_key,))
             if row:
@@ -390,8 +394,8 @@ class Database:
         from datetime import timedelta
         run_at = iso(utcnow() + timedelta(seconds=delay_seconds))
         self.execute(
-            "INSERT INTO jobs(id,type,dedupe_key,payload_json,status,run_at) VALUES(?,?,?,?,'queued',?)",
-            (jid, job_type, dedupe_key, json_dumps(payload), run_at),
+            "INSERT INTO jobs(id,type,dedupe_key,payload_json,status,priority,run_at) VALUES(?,?,?,?,'queued',?,?)",
+            (jid, job_type, dedupe_key, json_dumps(payload), priority, run_at),
         )
         return jid
 
@@ -399,7 +403,8 @@ class Database:
         with self._lock, self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT * FROM jobs WHERE status='queued' AND run_at<=? ORDER BY run_at LIMIT 1", (iso(),)
+                "SELECT * FROM jobs WHERE status='queued' AND run_at<=? ORDER BY priority DESC, run_at LIMIT 1",
+                (iso(),),
             ).fetchone()
             if not row:
                 return None

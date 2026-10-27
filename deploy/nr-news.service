@@ -1,5 +1,5 @@
 [Unit]
-Description=AZAD STUDIO dry-run service and scheduler
+Description=AZAD STUDIO continuous newsroom service and scheduler
 After=network-online.target
 Wants=network-online.target
 

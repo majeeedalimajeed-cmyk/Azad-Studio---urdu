@@ -106,7 +106,8 @@ class PublishingAgent:
 
         existing = self.db.publish_attempt(idempotency_key)
         if existing and existing["status"] == "success":
-            return {"status": "already_published", "post_id": existing.get("post_id"), "attempt_id": existing["id"]}
+            return {"status": "already_published", "post_id": existing.get("post_id"),
+                    "attempt_id": existing["id"], "caption_marker": marker}
         if existing and existing["status"] in {"unknown", "running"}:
             return self._reconcile(existing, page_id, marker, caption_hash)
         if existing and existing["status"] == "failed" and int(existing["attempts"]) >= 3:
@@ -150,7 +151,8 @@ class PublishingAgent:
                                          http_status=200,
                                          details={"page_id": page_id, "post_id": post_id,
                                                   "attempt": attempt_no, "test": test})
-                return {"status": "success", "post_id": post_id, "attempt_id": pid, "attempts": attempt_no}
+                return {"status": "success", "post_id": post_id, "attempt_id": pid,
+                        "attempts": attempt_no, "caption_marker": marker}
             except GraphAPIError as exc:
                 last_error = exc
                 self.db.insert_api_event("facebook", "publish_photo", "error", str(exc),
@@ -200,7 +202,8 @@ class PublishingAgent:
             self.db.insert_api_event("facebook", "reconcile", "success",
                                      "Existing post found; duplicate publication prevented.",
                                      details={"post_id": post_id, "marker": marker})
-            return {"status": "success", "post_id": post_id, "attempt_id": attempt["id"], "reconciled": True}
+            return {"status": "success", "post_id": post_id, "attempt_id": attempt["id"],
+                    "reconciled": True, "caption_marker": marker}
         self.db.update_publish_attempt(attempt["id"], status="unknown", last_error="No matching post found in recent feed.")
         return {"status": "unknown", "reason": "No matching post found; manual reconciliation required.",
                 "attempt_id": attempt["id"]}

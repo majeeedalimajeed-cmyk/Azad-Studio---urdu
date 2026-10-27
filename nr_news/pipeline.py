@@ -12,7 +12,7 @@ from typing import Any
 from .agents import (CardAgent, MediaAgent, PublishingAgent, ResearchAgent,
                      RomanUrduTranslatorAgent, TranslationValidator, VerificationAgent,
                      VideoWorkflow)
-from .agents.verification import EvidenceFetcher
+from .agents.verification import EvidenceFetcher, editorial_exclusion_text
 from .config import CONFIG
 from .db import Database
 from .llm import AgentUnavailable
@@ -166,7 +166,20 @@ class NewsPipeline:
             publication_time=iso(),
             media=media,
         )
-        status = "approved" if self.config.auto_approve_verified and self.config.operator_approved else "pending_review"
+        if editorial_exclusion_text(
+            content.urdu_headline, " ".join(content.urdu_bullets),
+            content.roman_headline, " ".join(content.roman_bullets),
+            candidate.get("original_headline", ""), candidate.get("body_excerpt", ""),
+        ):
+            self.db.add_review(candidate_id, verification.cluster_id, "no_crime_policy_hold", {
+                "reason": "Generated editorial matched the no-crime exclusion filter.",
+            })
+            return {"status": "held", "candidate_id": candidate_id,
+                    "reason": "No-crime editorial policy hold"}
+        status = "approved" if (
+            self.config.auto_approve_verified and self.config.operator_approved
+            and self.config.auto_post_enabled
+        ) else "pending_review"
         approved_by = "auto_policy" if status == "approved" else None
         editorial_id, created = self.db.insert_editorial(candidate_id, verification.cluster_id,
                                                          content.to_dict(), status=status)

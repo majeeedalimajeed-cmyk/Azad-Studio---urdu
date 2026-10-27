@@ -34,6 +34,19 @@ The supplied gold-on-black monogram from the reference card is used byte-for-byt
 
 All source requests use a polite user agent, a per-host minimum interval, conditional GETs, timeouts, size limits, redirects, robots checks, and retry/backoff logic. A 403 or unavailable robots policy is treated as a source outage, not bypassed. Snapshot-only candidates are marked `raw.snapshot_only = true` and held; they can never produce a publishable card without a fresh direct re-read.
 
+### Editorial policy and priority
+
+The operator's current policy is **no crime news, more political news, regional first and then the rest**. The durable job queue now orders work by priority:
+
+1. Regional politics: Hyderabad / Telangana government, elections, courts and policy.
+2. National politics.
+3. International politics and diplomacy.
+4. Regional public-interest news.
+5. Development, economy, education and health news.
+6. Other verified news.
+
+Crime, graphic violence, suicide/accident, rumors and unsupported allegations are excluded at three independent stages: source ingest, Agent B verification, and the generated bilingual editorial. The expanded filter covers police cases, arrests, accused persons, bail, FIRs, fraud, scams, harassment, drugs, encounters and related terms in English and Urdu.
+
 ### Schedule and durability
 
 `nr_news/service.py` runs a persistent scheduler, worker, and HTTP dashboard. It uses Asia/Kolkata time and a durable SQLite queue/database. Defaults:
@@ -53,7 +66,7 @@ Database tables include `source_status`, `clusters`, `candidates`, `review_queue
 - Required permissions/tasks include `pages_manage_posts`, `pages_read_engagement`, `pages_show_list`, and Page tasks `CREATE_CONTENT`, `MANAGE`, `MODERATE`. Confirm them in Meta's [permissions reference](https://developers.facebook.com/docs/permissions).
 - The numeric profile ID `61595929711037` is **not** assumed to be a Page ID. `FacebookGraphClient.verify_identity()` resolves the configured profile URL, an explicit `NR_FB_PAGE_ID`, or the exact expected Page name via `/me/accounts`; it verifies required permissions/tasks, checks the Page token against `/{page_id}`, and stores the confirmed Page ID/name/time in the database.
 - Dry-run Graph API verification has confirmed the publishing identity as **Page ID `1383450338187017`**, name **`Azad Studio`**, canonical link `https://www.facebook.com/1383450338187017`. The original profile URL is kept only as a lookup hint/audit note.
-- Live publishing additionally requires `NR_DRY_RUN=false`, `NR_PUBLISH_ENABLED=true`, `NR_PUBLISH_SAFETY_OK=true`, `NR_OPERATOR_APPROVED=true`, a passed visual inspection, `NR_FB_USER_ACCESS_TOKEN`, `NR_FB_PAGE_ACCESS_TOKEN`, `NR_FB_PAGE_ID`, `NR_EXPECTED_PAGE_NAME`, API-confirmed Page identity, and an operator-approved successful test post.
+- Live publishing additionally requires `NR_DRY_RUN=false`, `NR_PUBLISH_ENABLED=true`, `NR_PUBLISH_SAFETY_OK=true`, `NR_OPERATOR_APPROVED=true`, `NR_VERIFY_APPROVED=true`, `NR_AUTO_APPROVE_VERIFIED=true`, `NR_AUTO_POST_ENABLED=true`, a passed visual inspection, `NR_FB_USER_ACCESS_TOKEN`, `NR_FB_PAGE_ACCESS_TOKEN`, `NR_FB_PAGE_ID`, `NR_EXPECTED_PAGE_NAME`, API-confirmed Page identity, and an operator-approved successful test post. `NR_AUTO_POST_ENABLED` is the continuous auto-post kill switch; set it to `false` to stop.
 - Secrets are read from environment variables or `*_FILE` paths. They are never written to source, logs, captions, cards, or prompts.
 
 ---
@@ -89,12 +102,15 @@ python3 -m nr_news.cli scan --mode hourly|breaking|morning --drain-limit 100
 python3 -m nr_news.cli worker --limit 100
 python3 -m nr_news.cli approve --editorial-id EDITORIAL_ID
 NR_EXPECTED_PAGE_NAME="EXACT PAGE NAME" python3 -m nr_news.cli verify-facebook
+python3 -m nr_news.cli bootstrap-test-post --i-understand-this-posts-publicly
 python3 -m nr_news.cli test-publish --editorial-id EDITORIAL_ID --i-understand-this-posts-publicly
 python3 -m nr_news.cli report
 python3 -m nr_news.cli serve
 ```
 
-`python3 -m nr_news.cli selftest` runs the offline suite and writes the 12 required behavior checks to `reports/TEST_RESULTS.md`. A separate `fixture` command runs the end-to-end dry-run card and caption.
+`bootstrap-test-post` is the launch command: it renders the verified regional TGPSC fixture, marks it operator-approved, publishes one public test post, confirms the post ID through the Graph API, and writes `reports/TEST_POST_RESULT.md`. The `--i-understand-this-posts-publicly` flag is the explicit operator consent.
+
+`python3 -m nr_news.cli selftest` runs the offline suite and writes the required behavior checks to `reports/TEST_RESULTS.md`. A separate `fixture` command runs the end-to-end dry-run card and caption.
 
 ---
 
@@ -135,14 +151,15 @@ Use a real always-on host, reverse proxy/TLS, log rotation, database backups, se
 
 ### GitHub Actions and repository secrets
 
-The repository includes four workflows in `.github/workflows/` (full mapping: `deploy/github-actions.md`):
+The repository includes five workflows in `.github/workflows/` (full mapping: `deploy/github-actions.md`):
 
 - `ci.yml` — runs tests, checks the exact logo/fonts, and renders a dry-run fixture card on every push/PR.
 - `verify-facebook.yml` — manually resolves and confirms the Facebook Page through the Graph API.
-- `hourly-newsroom.yml` — scheduled hourly scan/verification using the durable SQLite cache; stays in dry run by default.
+- `test-post.yml` — manually publishes one operator-approved public test post and confirms it through the Graph API.
+- `hourly-newsroom.yml` — scheduled hourly scan/verification using the durable SQLite cache; publishes only when all auto-post safety variables are enabled, otherwise remains a dry run.
 - `container.yml` — builds and pushes the Docker image to GitHub Container Registry.
 
-All four workflows have been dispatched successfully in dry-run mode; see `reports/LAUNCH_CHECKLIST.md` for run links.
+The CI, identity, hourly scan and container workflows were validated successfully in dry-run mode; see `reports/LAUNCH_CHECKLIST.md` for run links. The public test-post workflow is dispatched only after explicit operator approval.
 
 Required **repository secrets**:
 
@@ -154,7 +171,9 @@ Required **repository secrets**:
 | `GROK_API_KEY` | xAI key mapped to `NR_LLM_API_KEY` for Agent A/B/C and the reviewer. |
 | `OPENAI_API_KEY` | Optional fallback if the gateway is switched back to OpenAI. |
 
-Required **repository variables**: `NR_EXPECTED_PAGE_NAME`, `NR_FB_PAGE_ID`, `NR_GRAPH_API_VERSION`, `NR_LLM_API_BASE`, `NR_LLM_MODEL`, `NR_ROMAN_URDU_MODEL`, `NR_VALIDATOR_MODEL`, `NR_DRY_RUN`, and `NR_PUBLISH_ENABLED`.
+Required **repository variables**: `NR_EXPECTED_PAGE_NAME`, `NR_FB_PAGE_ID`, `NR_GRAPH_API_VERSION`, `NR_LLM_API_BASE`, `NR_LLM_MODEL`, `NR_ROMAN_URDU_MODEL`, `NR_VALIDATOR_MODEL`, `NR_DRY_RUN`, `NR_PUBLISH_ENABLED`, `NR_PUBLISH_SAFETY_OK`, `NR_OPERATOR_APPROVED`, `NR_VERIFY_APPROVED`, `NR_AUTO_APPROVE_VERIFIED`, and `NR_AUTO_POST_ENABLED`.
+
+To stop continuous posting, set `NR_AUTO_POST_ENABLED=false` and `NR_PUBLISH_ENABLED=false` (and `NR_PUBLISH_SAFETY_OK=false` / `NR_DRY_RUN=true` for a full reset). See `deploy/STOP_AUTO_POSTING.md` and `deploy/toggle_auto_posting.py` for the exact kill-switch procedure.
 
 The Grok gateway is OpenAI-compatible at `https://api.x.ai/v1`; current model IDs such as `grok-4.7` are documented by xAI [1](https://docs.x.ai/overview) and [11](https://docs.x.ai/developers/models). A local `.env` may contain non-secret config and `*_FILE` paths; it is ignored by git and never contains token values. GitHub Actions secrets are write-only and are injected as environment variables at runtime.
 
@@ -169,9 +188,9 @@ The Grok gateway is OpenAI-compatible at `https://api.x.ai/v1`; current model ID
 5. Production LLM gateway is configured in GitHub Actions with `GROK_API_KEY`, `grok-4.7`, and reviewer `grok-4.6`; provide a local key file only if local generation is needed.
 6. Verify direct production access to all four sources; Munsif, Etemaad, and The Wire are working, while Indian Express still needs production-host confirmation.
 7. Reconfirm the exact supplied monogram hash and fonts after deployment.
-8. Approve a real candidate in the review queue, inspect the final rendered card, and run `test-publish` with explicit operator approval.
-9. Confirm the returned Graph API `post_id` and the post's visible Page location.
-10. Enable live publishing only after an operator signs off on the full test post and audit record.
+8. Inspect the final rendered card and run `bootstrap-test-post --i-understand-this-posts-publicly` (or the `test-post.yml` workflow) with explicit operator approval.
+9. Confirm the returned Graph API `post_id` and the post's visible Page location; `reports/TEST_POST_RESULT.md` records the independent Graph API confirmation.
+10. Enable live auto posting only after an operator signs off on the full test post and audit record, then set the continuous auto-post variables. Use `NR_AUTO_POST_ENABLED=false` as the standing stop switch.
 
 See `reports/LAUNCH_CHECKLIST.md` for the current pass/hold matrix and `reports/DRY_RUN_REPORT.md` for the generated audit snapshot.
 

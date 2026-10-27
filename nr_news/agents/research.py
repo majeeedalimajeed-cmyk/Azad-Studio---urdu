@@ -10,13 +10,40 @@ from ..llm import AgentUnavailable, LLMClient
 from ..models import Candidate, SourceResult, VerificationResult
 from ..util import (canonical_url, json_dumps, numbers, parse_iso, sha256_text,
                     story_fingerprint, utcnow)
+from .verification import editorial_exclusion_text
 
-PRIORITY_PATTERNS = (
-    (10, r"hyderabad|حیدرآباد|telangana|تلنگانہ|gh|hmwssb|hydraa"),
-    (8, r"election|parliament|cabinet|government|policy|court|supreme|minister|الیکشن|حکومت|وزیر|عدالت"),
-    (6, r"education|employment|health|agriculture|transport|infrastructure|تعلیم|ملازمت|صحت|زراعت|ٹرانسپورٹ"),
-    (5, r"business|technology|diplomacy|world|business|معیشت|ٹیکنالوجی"),
-)
+PRIORITY_PATTERNS = {
+    # Regional first: Hyderabad/Telangana and district-level public-interest news.
+    "regional": re.compile(
+        r"hyderabad|حیدرآباد|telangana|تلنگانہ|secunderabad|سکندرآباد|ghmc|hmwssb|hydraa|hmda|tsrtc|"
+        r"ranga reddy|rangareddy|medchal|sangareddy|nalgonda|warangal|karimnagar|nizamabad|khammam|"
+        r"mahbubnagar|adilabad|siddipet|sircilla|kothagudem|bhadradri|jagtial|peddapalli|mancherial|"
+        r"nirmal|komaram bheem|asifabad|gadwal|narayanpet|vikarabad|medak|yadadri|bhuvanagiri|"
+        r"jangaon|mahabubabad|mulugu|jogulamba|wanaparthy|nagarkurnool|rajanna", re.I),
+    # More political news: government, elections, courts, policy and parties.
+    "political": re.compile(
+        r"election|parliament|assembly|cabinet|government|policy|court|supreme court|high court|"
+        r"minister|chief minister|prime minister|president|governor|bjp|congress|brs|aimim|"
+        r"politician|political|party|candidate|vote|manifesto|law|bill|ordinance|scheme|"
+        r"election commission|lok sabha|rajya sabha|vidhan sabha|panchayat|municipal|local body|"
+        r"الیکشن|حکومت|وزیر|عدالت|اسمبلی|پارلیمنٹ|صدر|گورنر|سیاست|سیاسی|پارٹی|امیدوار|ووٹ|"
+        r"منشور|قانون|بل|پالیسی|اسکیم|سرکاری|حکومتی", re.I),
+    # International affairs after regional and national politics.
+    "international": re.compile(
+        r"international|world|global|foreign|diplomacy|diplomatic|bilateral|summit|"
+        r"united nations|g20|brics|saarc|china|pakistan|russia|ukraine|israel|gaza|iran|"
+        r"saudi|uae|japan|nepal|sri lanka|bangladesh|america|britain|france|germany|"
+        r"europe|africa|asia|بین الاقوامی|دنیا|عالمی|سفارت|سفارتی|غیر ملکی|چین|پاکستان|روس|"
+        r"یوکرین|اسرائیل|غزہ|ایران|سعودی|متحدہ عرب امارات|جاپان|نیپال|سری لنکا|بنگلہ دیش", re.I),
+    # Public-interest development and economy news after politics.
+    "development": re.compile(
+        r"education|employment|jobs|health|agriculture|transport|infrastructure|business|"
+        r"technology|science|climate|weather|cyclone|rain|monsoon|budget|gdp|inflation|market|"
+        r"railway|metro|airport|highway|road|bridge|power|energy|water|irrigation|hospital|"
+        r"vaccine|disease|crop|farmer|tgpsc|exam|recruitment|تعلیم|ملازمت|صحت|زراعت|"
+        r"ٹرانسپورٹ|انفراسٹرکچر|معیشت|ٹیکنالوجی|سائنس|موسم|بارش|بجٹ|منڈی|ریلوے|"
+        r"میٹرو|ایئرپورٹ|سڑک|پل|بجلی|پانی|آبپاشی|ہسپتال|فصل|کسان|امتحان|بھرتی", re.I),
+}
 
 RESEARCH_SYSTEM = """You are Agent A, an Urdu news research and extraction agent.
 You receive ONLY a short excerpt from an original report, its headline, and verified evidence notes.
@@ -42,12 +69,25 @@ class ResearchAgent:
 
     @staticmethod
     def priority(candidate: Candidate) -> int:
-        text = (candidate.original_headline + " " + candidate.body_excerpt + " " + candidate.url).lower()
-        score = 1
-        for points, pattern in PRIORITY_PATTERNS:
-            if re.search(pattern, text, re.I):
-                score = max(score, points)
-        return score
+        """Rank regional politics first, then national/international politics, then development."""
+        text = candidate.original_headline + " " + candidate.body_excerpt + " " + candidate.url
+        regional = bool(PRIORITY_PATTERNS["regional"].search(text))
+        political = bool(PRIORITY_PATTERNS["political"].search(text))
+        international = bool(PRIORITY_PATTERNS["international"].search(text))
+        development = bool(PRIORITY_PATTERNS["development"].search(text))
+        if regional and political:
+            return 12
+        if political and not international:
+            return 10
+        if political and international:
+            return 9
+        if regional:
+            return 8
+        if development:
+            return 6
+        if international:
+            return 4
+        return 1
 
     def ingest(self, source_results: list[SourceResult], mode: str) -> list[str]:
         """Persist candidates and enqueue immediate verification for new items."""
@@ -57,6 +97,17 @@ class ResearchAgent:
                 row = self._to_row(candidate, mode)
                 cid, created = self.db.insert_candidate(row)
                 if not created:
+                    continue
+                if editorial_exclusion_text(
+                    candidate.original_headline, candidate.url,
+                    candidate.category or "", candidate.body_excerpt,
+                ):
+                    self.db.update_candidate(cid, status="excluded", review_reason="editorial_exclusion")
+                    self.db.insert_api_event(
+                        "agent_a", "editorial_filter", "excluded",
+                        "No-crime editorial policy excluded this candidate before verification.",
+                        details={"candidate_id": cid, "headline": candidate.original_headline},
+                    )
                     continue
                 new_candidate_ids.append(cid)
                 priority = self.priority(candidate)
@@ -69,7 +120,7 @@ class ResearchAgent:
                 self.db.enqueue_job(
                     "verify_story",
                     {"candidate_id": cid, "mode": mode, "priority": priority, "breaking": breaking},
-                    dedupe_key=f"verify:{cid}",
+                    dedupe_key=f"verify:{cid}", priority=priority,
                 )
                 if breaking:
                     self.db.insert_api_event("breaking_news", "candidate_detected", "queued",

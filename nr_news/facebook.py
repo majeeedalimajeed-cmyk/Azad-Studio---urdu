@@ -183,3 +183,23 @@ class FacebookGraphClient:
             if caption_hash_marker in str(post.get("message", "")):
                 return post
         return None
+
+    def get_post(self, post_id: str) -> dict[str, Any]:
+        """Independently confirm a published post through the Graph API."""
+        tokens = [t for t in (self.config.facebook_page_token,
+                              self.config.facebook_user_token) if t]
+        last_error: GraphAPIError | None = None
+        for token in tokens:
+            try:
+                return self._call(
+                    "GET", f"/{post_id}", token=token,
+                    params={"fields": "id,message,created_time,permalink_url"},
+                )
+            except GraphAPIError as exc:
+                last_error = exc
+                if exc.transient:
+                    raise
+        detail = redact(str(last_error) if last_error else "no token", self.config.secret_values)
+        raise GraphAPIError(f"Could not confirm post {post_id}: {detail}",
+                            status=getattr(last_error, "status", None),
+                            code="POST_CONFIRMATION_FAILED")

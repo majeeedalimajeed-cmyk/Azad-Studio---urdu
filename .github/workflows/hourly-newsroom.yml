@@ -15,6 +15,25 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    env:
+      NR_SKIP_DOTENV: "1"
+      NR_DRY_RUN: ${{ vars.NR_DRY_RUN }}
+      NR_PUBLISH_ENABLED: ${{ vars.NR_PUBLISH_ENABLED }}
+      NR_PUBLISH_SAFETY_OK: ${{ vars.NR_PUBLISH_SAFETY_OK }}
+      NR_OPERATOR_APPROVED: ${{ vars.NR_OPERATOR_APPROVED }}
+      NR_VERIFY_APPROVED: ${{ vars.NR_VERIFY_APPROVED }}
+      NR_AUTO_APPROVE_VERIFIED: ${{ vars.NR_AUTO_APPROVE_VERIFIED }}
+      NR_AUTO_POST_ENABLED: ${{ vars.NR_AUTO_POST_ENABLED }}
+      NR_GRAPH_API_VERSION: ${{ vars.NR_GRAPH_API_VERSION }}
+      NR_EXPECTED_PAGE_NAME: ${{ vars.NR_EXPECTED_PAGE_NAME }}
+      NR_FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+      NR_FB_USER_ACCESS_TOKEN: ${{ secrets.FB_USER_ACCESS_TOKEN }}
+      NR_FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+      NR_LLM_API_KEY: ${{ secrets.GROK_API_KEY }}
+      NR_LLM_API_BASE: ${{ vars.NR_LLM_API_BASE }}
+      NR_LLM_MODEL: ${{ vars.NR_LLM_MODEL }}
+      NR_ROMAN_URDU_MODEL: ${{ vars.NR_ROMAN_URDU_MODEL }}
+      NR_VALIDATOR_MODEL: ${{ vars.NR_VALIDATOR_MODEL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,36 +62,25 @@ jobs:
         run: python -m nr_news.cli init
 
       - name: Verify Page identity
-        env:
-          NR_GRAPH_API_VERSION: ${{ vars.NR_GRAPH_API_VERSION }}
-          NR_EXPECTED_PAGE_NAME: ${{ vars.NR_EXPECTED_PAGE_NAME }}
-          NR_FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          NR_FB_USER_ACCESS_TOKEN: ${{ secrets.FB_USER_ACCESS_TOKEN }}
-          NR_FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
         run: python -m nr_news.cli verify-facebook
 
       - name: Hourly source scan and verification jobs
-        env:
-          NR_DRY_RUN: ${{ vars.NR_DRY_RUN }}
-          NR_PUBLISH_ENABLED: ${{ vars.NR_PUBLISH_ENABLED }}
-          NR_GRAPH_API_VERSION: ${{ vars.NR_GRAPH_API_VERSION }}
-          NR_EXPECTED_PAGE_NAME: ${{ vars.NR_EXPECTED_PAGE_NAME }}
-          NR_FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          NR_FB_USER_ACCESS_TOKEN: ${{ secrets.FB_USER_ACCESS_TOKEN }}
-          NR_FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-          NR_LLM_API_KEY: ${{ secrets.GROK_API_KEY }}
-          NR_LLM_API_BASE: ${{ vars.NR_LLM_API_BASE }}
-          NR_LLM_MODEL: ${{ vars.NR_LLM_MODEL }}
-          NR_ROMAN_URDU_MODEL: ${{ vars.NR_ROMAN_URDU_MODEL }}
-          NR_VALIDATOR_MODEL: ${{ vars.NR_VALIDATOR_MODEL }}
         run: |
           python -m nr_news.cli scan --mode hourly --drain-limit 100
           python -m nr_news.cli worker --limit 100
 
-      - name: Generate dry-run report
-        env:
-          NR_EXPECTED_PAGE_NAME: ${{ vars.NR_EXPECTED_PAGE_NAME }}
+      - name: Generate operations report
         run: python -m nr_news.cli report --output reports/DRY_RUN_REPORT.md
+
+      - name: Write run summary
+        run: |
+          {
+            echo "## AZAD STUDIO hourly newsroom"
+            echo "- Auto post: \`${{ vars.NR_AUTO_POST_ENABLED }}\`"
+            echo "- Dry run: \`${{ vars.NR_DRY_RUN }}\`"
+            echo "- Publish enabled: \`${{ vars.NR_PUBLISH_ENABLED }}\`"
+            echo "- Safety interlock: \`${{ vars.NR_PUBLISH_SAFETY_OK }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload cards, audits and reports
         uses: actions/upload-artifact@v4

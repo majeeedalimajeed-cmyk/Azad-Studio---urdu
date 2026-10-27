@@ -15,6 +15,7 @@ services:
       NR_OPERATOR_APPROVED: "false"
       NR_VERIFY_APPROVED: "false"
       NR_AUTO_APPROVE_VERIFIED: "false"
+      NR_AUTO_POST_ENABLED: "false"
       NR_VIDEO_ENABLED: "false"
       NR_GRAPH_API_VERSION: "v26.0"
       NR_PORT: "8000"

@@ -12,26 +12,49 @@ This repository uses **repository secrets** for credentials and **repository var
 | `GROK_API_KEY` | xAI API key | `NR_LLM_API_KEY` |
 | `OPENAI_API_KEY` | Optional fallback key | `NR_LLM_API_KEY` fallback |
 
+The newly added permanent Facebook token belongs in `FB_PAGE_ACCESS_TOKEN` and/or `FB_USER_ACCESS_TOKEN` as appropriate. GitHub secret values are write-only; do not paste them into chat, source, or logs.
+
 ## Variables
 
-| Name | Example |
-|---|---|
-| `NR_EXPECTED_PAGE_NAME` | `Azad Studio` |
-| `NR_FB_PAGE_ID` | `1383450338187017` |
-| `NR_GRAPH_API_VERSION` | `v26.0` |
-| `NR_LLM_API_BASE` | `https://api.x.ai/v1` |
-| `NR_LLM_MODEL` | `grok-4.7` |
-| `NR_ROMAN_URDU_MODEL` | `grok-4.7` |
-| `NR_VALIDATOR_MODEL` | `grok-4.6` |
-| `NR_DRY_RUN` | `true` |
-| `NR_PUBLISH_ENABLED` | `false` |
+| Name | Example | Purpose |
+|---|---|---|
+| `NR_EXPECTED_PAGE_NAME` | `Azad Studio` | Exact expected Page name. |
+| `NR_FB_PAGE_ID` | `1383450338187017` | API-confirmed Page ID lookup hint. |
+| `NR_GRAPH_API_VERSION` | `v26.0` | Graph API version. |
+| `NR_LLM_API_BASE` | `https://api.x.ai/v1` | OpenAI-compatible Grok base URL. |
+| `NR_LLM_MODEL` | `grok-4.7` | Agent A Urdu model. |
+| `NR_ROMAN_URDU_MODEL` | `grok-4.7` | Agent C Roman Urdu model. |
+| `NR_VALIDATOR_MODEL` | `grok-4.6` | Independent reviewer model. |
+| `NR_DRY_RUN` | `true` / `false` | Dry-run switch. |
+| `NR_PUBLISH_ENABLED` | `false` / `true` | Public publishing switch. |
+| `NR_PUBLISH_SAFETY_OK` | `false` / `true` | Explicit safety interlock. |
+| `NR_OPERATOR_APPROVED` | `false` / `true` | Operator approval flag. |
+| `NR_VERIFY_APPROVED` | `false` / `true` | Verification approval flag. |
+| `NR_AUTO_APPROVE_VERIFIED` | `false` / `true` | Auto-approve verified editorials. |
+| `NR_AUTO_POST_ENABLED` | `false` / `true` | Continuous auto-post kill switch. |
+
+For live auto posting, set `NR_DRY_RUN=false`, `NR_PUBLISH_ENABLED=true`, `NR_PUBLISH_SAFETY_OK=true`, `NR_OPERATOR_APPROVED=true`, `NR_VERIFY_APPROVED=true`, `NR_AUTO_APPROVE_VERIFIED=true`, and `NR_AUTO_POST_ENABLED=true`. To stop, set `NR_PUBLISH_ENABLED=false`, `NR_AUTO_POST_ENABLED=false`, and `NR_PUBLISH_SAFETY_OK=false` (see `deploy/STOP_AUTO_POSTING.md`).
 
 ## Workflows
 
 - **CI — tests and dry-run card**: push/PR/manual. Runs `check-assets`, `pytest`, and a verified fixture render. Uploads the PNG card as an artifact.
 - **Verify Facebook Page identity**: manual. Maps secrets to env vars and runs `python -m nr_news.cli verify-facebook`. It does not post.
-- **Hourly newsroom scan**: hourly/manual. Restores the SQLite cache, verifies Page identity, runs the hourly scan and queued verification jobs, generates a report, and uploads cards/audits/reports. It stays in dry run until the variables are changed and all launch holds clear.
+- **Operator-approved public test post**: manual. Runs the verified regional fixture through the full live publishing path with explicit operator approval, confirms the post through the Graph API, records `facebook_test_post_passed` in the durable SQLite cache, and writes `reports/TEST_POST_RESULT.md`.
+- **Hourly newsroom scan**: hourly/manual. Restores the SQLite cache, verifies Page identity, runs the hourly scan and queued verification jobs, generates a report, and uploads cards/audits/reports. With the auto-post variables enabled it publishes only verified, fresh, non-crime, deduplicated editorials; otherwise it remains a dry run.
 - **Build container image**: push/manual. Builds the Dockerfile and pushes to `ghcr.io/<owner>/azad-studio-urdu`.
+
+## Editorial priority
+
+The hourly worker claims jobs by durable priority:
+
+1. Regional politics (Hyderabad / Telangana government, elections, courts, policy).
+2. National politics.
+3. International politics / diplomacy.
+4. Regional public-interest news.
+5. Development / economy / education / health news.
+6. Other verified news.
+
+Crime, graphic violence, suicide/accident, rumors, and unsupported allegations are excluded at ingest, verification, and generated-editorial stages.
 
 ## Local equivalent
 
@@ -48,6 +71,11 @@ NR_ROMAN_URDU_MODEL=grok-4.7
 NR_VALIDATOR_MODEL=grok-4.6
 NR_DRY_RUN=true
 NR_PUBLISH_ENABLED=false
+NR_PUBLISH_SAFETY_OK=false
+NR_OPERATOR_APPROVED=false
+NR_VERIFY_APPROVED=false
+NR_AUTO_APPROVE_VERIFIED=false
+NR_AUTO_POST_ENABLED=false
 ```
 
 Never paste a token into `.env`, a workflow file, an issue, or chat. Rotate any token that has been exposed.

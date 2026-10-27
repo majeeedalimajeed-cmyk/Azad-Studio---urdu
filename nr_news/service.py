@@ -41,13 +41,13 @@ class PersistentScheduler:
         ]
         for name, key, minutes, payload in schedules:
             if self._due(key, minutes):
-                self.db.enqueue_job("scan", payload, dedupe_key=f"scan:{name}:{utc_now.strftime('%Y%m%d%H%M')}")
+                self.db.enqueue_job("scan", payload, dedupe_key=f"scan:{name}:{utc_now.strftime('%Y%m%d%H%M')}", priority=20)
                 self.db.set_setting(key, iso())
                 self.db.insert_api_event("scheduler", name, "queued", f"{name} scan job queued",
                                          details={"timezone": "Asia/Kolkata"})
         morning_key = "last_morning_scan_date"
         if now_ist.hour >= self.config.morning_hour_ist and self.db.get_setting(morning_key) != now_ist.strftime("%Y-%m-%d"):
-            self.db.enqueue_job("scan", {"mode": "morning"}, dedupe_key=f"scan:morning:{now_ist.strftime('%Y%m%d')}")
+            self.db.enqueue_job("scan", {"mode": "morning"}, dedupe_key=f"scan:morning:{now_ist.strftime('%Y%m%d')}", priority=20)
             self.db.set_setting(morning_key, now_ist.strftime("%Y-%m-%d"))
             self.db.set_setting("last_morning_scan", iso())
 
@@ -87,7 +87,11 @@ def build_status(db: Database, config=CONFIG) -> dict[str, Any]:
         "timezone": "Asia/Kolkata",
         "dry_run": config.dry_run,
         "publish_enabled": config.publish_enabled,
+        "publish_safety_switch": config.publish_safety_switch,
         "operator_approved": config.operator_approved,
+        "auto_post_enabled": config.auto_post_enabled,
+        "auto_approve_verified": config.auto_approve_verified,
+        "publish_safety_config_ok": config.publish_safety_ok,
         "publish_safety_ok": config.publish_safety_ok and db.get_setting("facebook_identity_verified_at") is not None,
         "facebook_destination": config.facebook_page_url,
         "facebook_page_id_confirmed": graph.confirmed_page_id(),
@@ -178,9 +182,14 @@ code{{color:var(--gold2);overflow-wrap:anywhere}}footer{{color:var(--muted);text
 <header><h1>AZAD STUDIO <span>NEWSROOM CONTROL CENTER</span></h1>
 <div class="sub">Asia/Kolkata · Graph API {esc(status['graph_api_version'])} · {esc(status['generated_at'])}</div></header>
 <main>
-<div class="notice"><strong>DRY RUN:</strong> Public Facebook publishing is disabled. The Page identity, credentials and operator-approved test post must be confirmed before live posting.</div>
+<div class="notice"><strong>{'DRY RUN' if status['dry_run'] else 'LIVE AUTO POST'}:</strong> {
+    'Public Facebook publishing is disabled; safety flags, API-confirmed Page identity and an operator-approved test post are required.'
+    if status['dry_run'] else
+    'Auto posting is enabled until stopped. Set NR_AUTO_POST_ENABLED or NR_PUBLISH_ENABLED to false to stop.'
+}</div>
 <div class="grid">
 <div class="tile"><div class="label">Mode</div><div class="value">{badge(status['dry_run'],'DRY RUN' if status['dry_run'] else 'LIVE')}</div></div>
+<div class="tile"><div class="label">Auto post</div><div class="value">{badge(status['auto_post_enabled'],'RUNNING' if status['auto_post_enabled'] else 'STOPPED')}</div></div>
 <div class="tile"><div class="label">Publishing safety</div><div class="value">{badge(status['publish_safety_ok'],'READY' if status['publish_safety_ok'] else 'BLOCKED')}</div></div>
 <div class="tile"><div class="label">Facebook Page ID</div><div class="value">{esc(status['facebook_page_id_confirmed'] or 'NOT API-CONFIRMED')}</div></div>
 <div class="tile"><div class="label">LLM agents</div><div class="value">{badge(status['llm_configured'],'CONFIGURED' if status['llm_configured'] else 'HOLD FOR REVIEW')}</div></div>
@@ -264,7 +273,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if mode not in {"hourly", "breaking", "morning"}:
                 self._json({"error": "invalid_mode"}, 400)
                 return
-            jid = self.db.enqueue_job("scan", {"mode": mode}, dedupe_key=f"manual:{mode}:{iso()[:16]}")
+            jid = self.db.enqueue_job("scan", {"mode": mode}, dedupe_key=f"manual:{mode}:{iso()[:16]}", priority=20)
             self._json({"queued": bool(jid), "job_id": jid, "mode": mode})
             return
         if path == "/api/approve":

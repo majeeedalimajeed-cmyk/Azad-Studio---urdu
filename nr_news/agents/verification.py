@@ -21,12 +21,22 @@ if VENDOR.exists() and str(VENDOR) not in sys.path:
     sys.path.insert(0, str(VENDOR))
 
 EXCLUSION_PATTERNS = re.compile(
-    r"murder|قتل|rape|زیادتی|robbery|ڈکیتی|theft|چوری|dacoity|loot|firing|فائرنگ|"
-    r"shooting|گولی|gangster|kidnap|اغوا|assault|حملہ|stab|چاقو|graphic|dead body|لاش|"
-    r"crime-news|جرائم|suicide|خودکشی|accident|حادثہ|bomb|دھماکہ|terror|دہشت|"
-    r"rumou?r|افواہ|fake|جعلی|unverified|غیر مصدقہ",
+    r"murder|قتل|rape|جنسی زیادتی|زیادتی|robbery|ڈکیتی|theft|چوری|dacoity|loot|لُوٹ|firing|فائرنگ|"
+    r"shooting|گولی|gangster|غنڈہ|kidnap|اغوا|abduct|assault|حملہ|stab|چاقو|graphic|dead body|لاش|"
+    r"crime-news|\bcrime\b|criminal|جرائم|مجرم|suicide|خودکشی|accident|حادثہ|bomb|blast|دھماکہ|terror|دہشت|"
+    r"police case|police custody|police arrest|\barrest(?:ed|s)?\b|گرفتار|accused|ملزم|bail|ضمانت|"
+    r"\bfir\b|ایف آئی آر|chargesheet|چالان|convict(?:ed|ion)?|سزا|sentenced|jail|جیل|prison|قید|"
+    r"fraud|دھوکہ|cheating|scam|گھوٹالہ|dowry|جہیز|harassment|ہراساں|molest|چھیڑ چھاڑ|"
+    r"domestic violence|گھریلو تشدد|smuggl|اسمگل|drug|نشیلا|narcotic|نشہ|lynch|"
+    r"gang|encounter|مقابلہ|shootout|burglar|robber|ڈاکو|pickpocket|جیب کتر|culprit|suspect|مشتبہ|"
+    r"victim|متاثرہ|violent riot|پرتشدد فساد|rumou?r|افواہ|fake|جعلی|unverified|غیر مصدقہ",
     re.I,
 )
+
+
+def editorial_exclusion_text(*parts: str) -> bool:
+    """Return True when any supplied text matches the no-crime editorial filter."""
+    return bool(EXCLUSION_PATTERNS.search(" ".join(str(part or "") for part in parts)))
 
 SENSITIVE_PATTERNS = re.compile(
     r"alleg|الزام|accus|دعوی|corruption|scam|probe|investigation|جانچ|"
@@ -84,10 +94,10 @@ class VerificationAgent:
 
         if raw.get("snapshot_only"):
             reasons.append("Direct source fetch unavailable; snapshot is non-publishable until original article is re-read.")
-        if EXCLUSION_PATTERNS.search(" ".join([
-            row.get("original_headline", ""), row.get("url", ""), row.get("category", ""),
-            row.get("body_excerpt", ""),
-        ])):
+        if editorial_exclusion_text(
+            row.get("original_headline", ""), row.get("url", ""),
+            row.get("category", ""), row.get("body_excerpt", ""),
+        ):
             reasons.append("Editorial exclusion: crime, graphic violence, suicide/accident, rumor or unsupported allegation.")
             result = VerificationResult(False, reasons, evidence, "none")
             self.db.update_candidate(candidate_id, status="excluded", review_reason="editorial_exclusion")

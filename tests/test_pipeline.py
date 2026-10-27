@@ -9,8 +9,9 @@ import pytest
 from PIL import Image
 
 from nr_news.agents.publisher import PublishingAgent
+from nr_news.agents.research import ResearchAgent
 from nr_news.agents.translator import TranslationValidator
-from nr_news.agents.verification import VerificationAgent
+from nr_news.agents.verification import VerificationAgent, editorial_exclusion_text
 from nr_news.config import CONFIG, ROOT
 from nr_news.db import Database
 from nr_news.facebook import GraphAPIError
@@ -34,8 +35,10 @@ def temp_config(tmp_path: Path, **overrides):
         "snapshot_dir": base / "snapshots",
         "dry_run": True,
         "publish_enabled": False,
+        "publish_safety_switch": False,
         "operator_approved": False,
         "verify_approved": False,
+        "auto_post_enabled": False,
         "llm_api_key": None,
         "llm_model": None,
         "translator_model": None,
@@ -124,6 +127,63 @@ def test_crime_story_is_excluded(tmp_path):
     assert result.approved is False
     assert any("exclusion" in x for x in result.reasons)
     assert db.get_candidate(cid)["status"] == "excluded"
+
+
+def test_expanded_crime_filter_and_priority_ranking(tmp_path):
+    assert editorial_exclusion_text("Police arrest accused in fraud case")
+    assert editorial_exclusion_text("Hyderabad court rejects bail in cheating case")
+    assert not editorial_exclusion_text("Telangana cabinet approves education policy")
+
+    regional = sample_candidate(
+        url="https://example.org/hyderabad-election-policy",
+        original_headline="Hyderabad election cabinet approves government policy",
+        body_excerpt="Telangana government announced an election policy decision in Hyderabad.",
+    )
+    national = sample_candidate(
+        url="https://example.org/parliament-election-policy",
+        original_headline="Parliament election committee approves government policy",
+        body_excerpt="The central government announced an election policy decision.",
+    )
+    world = sample_candidate(
+        url="https://example.org/global-summit-election-policy",
+        original_headline="Global summit election committee approves government policy",
+        body_excerpt="An international election policy decision was announced at a world summit.",
+    )
+    development = sample_candidate(
+        url="https://example.org/education-exam-recruitment",
+        original_headline="Education department announces exam recruitment",
+        body_excerpt="A public education exam and recruitment schedule was released.",
+    )
+    assert ResearchAgent.priority(regional) > ResearchAgent.priority(national)
+    assert ResearchAgent.priority(national) > ResearchAgent.priority(world)
+    assert ResearchAgent.priority(world) > ResearchAgent.priority(development)
+
+
+def test_crime_candidate_is_excluded_before_verification_job(tmp_path):
+    cfg = temp_config(tmp_path)
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    candidate = sample_candidate(
+        url="https://example.org/police-arrest-fraud",
+        original_headline="Police arrest accused in fraud case",
+        body_excerpt="Police arrested an accused person in a fraud case after a complaint.",
+    )
+    result = pipeline.scan("hourly", source_results=[
+        SourceResult("test_source", True, 1, "test", candidates=[candidate])
+    ])
+    assert result["jobs_queued"] == 0
+    rows = db.query("SELECT status, review_reason FROM candidates")
+    assert rows and rows[0]["status"] == "excluded"
+    assert rows[0]["review_reason"] == "editorial_exclusion"
+
+
+def test_high_priority_job_is_claimed_first(tmp_path):
+    cfg = temp_config(tmp_path)
+    db = Database(cfg.db_path)
+    db.enqueue_job("verify_story", {"candidate_id": "low"}, dedupe_key="low", priority=1)
+    high = db.enqueue_job("verify_story", {"candidate_id": "high"}, dedupe_key="high", priority=12)
+    claimed = db.claim_job()
+    assert claimed and claimed["id"] == high
 
 
 def test_translation_validator_catches_changed_number_and_name(tmp_path):
@@ -221,8 +281,9 @@ def test_durable_scheduler_queues_morning_comprehensive_scan(tmp_path):
 
 
 def test_facebook_publishing_blocked_without_api_confirmed_page(tmp_path):
-    cfg = temp_config(tmp_path, dry_run=False, publish_enabled=True, operator_approved=True,
-                      verify_approved=True, facebook_page_token="fake-token", expected_page_name="AZAD STUDIO")
+    cfg = temp_config(tmp_path, dry_run=False, publish_enabled=True, publish_safety_switch=True,
+                      operator_approved=True, verify_approved=True, auto_post_enabled=True,
+                      facebook_page_token="fake-token", expected_page_name="AZAD STUDIO")
     db = Database(cfg.db_path)
     pipeline = NewsPipeline(cfg, db)
     candidate = sample_candidate()
@@ -241,8 +302,9 @@ def test_facebook_publishing_blocked_without_api_confirmed_page(tmp_path):
 
 
 def test_graph_api_error_is_recorded_without_false_success(tmp_path):
-    cfg = temp_config(tmp_path, dry_run=False, publish_enabled=True, operator_approved=True,
-                      verify_approved=True, facebook_page_token="fake-token", expected_page_name="AZAD STUDIO")
+    cfg = temp_config(tmp_path, dry_run=False, publish_enabled=True, publish_safety_switch=True,
+                      operator_approved=True, verify_approved=True, auto_post_enabled=True,
+                      facebook_page_token="fake-token", expected_page_name="AZAD STUDIO")
     db = Database(cfg.db_path)
     pipeline = NewsPipeline(cfg, db)
     db.set_setting("facebook_identity_verified_at", iso())

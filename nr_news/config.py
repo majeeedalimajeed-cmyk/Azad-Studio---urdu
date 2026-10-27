@@ -108,9 +108,11 @@ class Config:
     # Safety defaults.
     dry_run: bool = field(default_factory=lambda: _bool("NR_DRY_RUN", True))
     publish_enabled: bool = field(default_factory=lambda: _bool("NR_PUBLISH_ENABLED", False))
+    publish_safety_switch: bool = field(default_factory=lambda: _bool("NR_PUBLISH_SAFETY_OK", False))
     operator_approved: bool = field(default_factory=lambda: _bool("NR_OPERATOR_APPROVED", False))
     verify_approved: bool = field(default_factory=lambda: _bool("NR_VERIFY_APPROVED", False))
     auto_approve_verified: bool = field(default_factory=lambda: _bool("NR_AUTO_APPROVE_VERIFIED", False))
+    auto_post_enabled: bool = field(default_factory=lambda: _bool("NR_AUTO_POST_ENABLED", False))
     video_enabled: bool = field(default_factory=lambda: _bool("NR_VIDEO_ENABLED", False))
     admin_token: str | None = field(default_factory=lambda: _secret("NR_ADMIN_TOKEN"))
 
@@ -169,10 +171,12 @@ class Config:
     @property
     def publish_safety_ok(self) -> bool:
         return (
-            not self.dry_run
+            self.publish_safety_switch
+            and not self.dry_run
             and self.publish_enabled
             and self.operator_approved
             and self.verify_approved
+            and self.auto_post_enabled
             and bool(self.facebook_page_token)
             and bool(self.expected_page_name)
         )

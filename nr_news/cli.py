@@ -86,6 +86,87 @@ def cmd_test_publish(args) -> int:
     return 0 if result.get("status") == "success" else 2
 
 
+def cmd_bootstrap_test_post(args) -> int:
+    """Create the first real public post from an operator-approved verified fixture."""
+    if not args.i_understand_this_posts_publicly:
+        print("Refusing: pass --i-understand-this-posts-publicly after written operator approval.", file=sys.stderr)
+        return 2
+    pipeline = NewsPipeline()
+    fixture = Path(args.fixture)
+    prepared = pipeline.run_fixture(fixture, dry_run=False)
+    if prepared.get("status") not in {"rendered", "duplicate_editorial", "duplicate_fixture"}:
+        print(json.dumps(prepared, ensure_ascii=False, indent=2))
+        return 2
+    editorial_id = prepared.get("editorial_id")
+    if not editorial_id:
+        print("Fixture did not yield an editorial ID.", file=sys.stderr)
+        return 2
+    pipeline.db.set_editorial_status(editorial_id, "approved", "operator_cli")
+    pipeline.db.insert_api_event(
+        "operator", "bootstrap_test_post", "approved",
+        "Operator approved a verified regional fixture for the first public test post.",
+        details={"editorial_id": editorial_id},
+    )
+    card = pipeline.db.one(
+        "SELECT * FROM cards WHERE editorial_id=? AND visual_status='passed' ORDER BY created_at LIMIT 1",
+        (editorial_id,),
+    )
+    if not card:
+        print("No visually inspected card found.", file=sys.stderr)
+        return 2
+    publish = pipeline.publisher.publish(editorial_id, card, dry_run=False, test=True)
+    if publish.get("status") != "success":
+        print(json.dumps(publish, ensure_ascii=False, indent=2))
+        return 2
+    post_id = str(publish.get("post_id") or "")
+    if not post_id:
+        print("Publishing succeeded without a confirmed post ID.", file=sys.stderr)
+        return 2
+    graph = FacebookGraphClient(pipeline.db, pipeline.config)
+    try:
+        confirmation = graph.get_post(post_id)
+    except Exception as exc:
+        message = redact(f"{type(exc).__name__}: {exc}", pipeline.config.secret_values)
+        print(f"Graph API post confirmation failed: {message}", file=sys.stderr)
+        return 2
+    confirmed_id = str(confirmation.get("id") or "")
+    if not confirmed_id:
+        print("Graph API did not confirm the published post ID.", file=sys.stderr)
+        return 2
+    report_path = ROOT / "reports/TEST_POST_RESULT.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        "# AZAD STUDIO — Operator-Approved Public Test Post\n\n"
+        f"- Confirmed at: `{iso()}`\n"
+        f"- API-confirmed Page ID: `{graph.confirmed_page_id() or 'not confirmed'}`\n"
+        f"- Page name: `{pipeline.db.get_setting('facebook_page_name') or 'not confirmed'}`\n"
+        f"- Editorial ID: `{editorial_id}`\n"
+        f"- Card: `{card['file_path']}` (SHA-256 `{card['sha256'][:16]}…`)\n"
+        f"- Graph API post ID: `{confirmed_id}`\n"
+        f"- Permalink: `{confirmation.get('permalink_url') or 'not returned'}`\n"
+        f"- Created time: `{confirmation.get('created_time') or 'not returned'}`\n"
+        f"- Caption marker: `{publish.get('caption_marker') or 'not returned'}`\n"
+        f"- Database test-post flag: `{pipeline.db.get_setting('facebook_test_post_passed')}`\n\n"
+        "This post was explicitly approved by the operator with "
+        "`--i-understand-this-posts-publicly`. No rumor, crime story, copyrighted article body, "
+        "or unlicensed image was used. The exact supplied monogram was verified by SHA-256.\n",
+        encoding="utf-8",
+    )
+    output = {
+        "status": "success",
+        "editorial_id": editorial_id,
+        "post_id": confirmed_id,
+        "page_id": graph.confirmed_page_id(),
+        "permalink_url": confirmation.get("permalink_url"),
+        "created_time": confirmation.get("created_time"),
+        "caption_marker": publish.get("caption_marker"),
+        "test_post_passed": pipeline.db.get_setting("facebook_test_post_passed"),
+        "report": str(report_path),
+    }
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_approve(args) -> int:
     db = Database(CONFIG.db_path)
     if not db.get_editorial(args.editorial_id):
@@ -104,13 +185,18 @@ def cmd_report(args) -> int:
     scan = pipeline.scan(args.mode) if args.scan else None
     status = build_status_for_report(db)
     lines = [
-        "# AZAD STUDIO — Dry-Run Report",
+        "# AZAD STUDIO — Operations Report",
         "",
         f"Generated: {iso()} (Asia/Kolkata timezone configured)",
         "",
         "## Safety state",
         f"- Dry run: `{CONFIG.dry_run}`",
         f"- Public publishing enabled: `{CONFIG.publish_enabled}`",
+        f"- Publish safety switch: `{CONFIG.publish_safety_switch}`",
+        f"- Operator approved: `{CONFIG.operator_approved}`",
+        f"- Auto post enabled: `{CONFIG.auto_post_enabled}`",
+        f"- Auto approve verified editorials: `{CONFIG.auto_approve_verified}`",
+        f"- Editorial priority: regional politics first, then national/international politics, then public-interest development; crime excluded",
         f"- Page identity API-confirmed: `{bool(status['facebook_page_id_confirmed'])}`",
         f"- API-confirmed Page ID: `{status['facebook_page_id_confirmed'] or 'not confirmed'}`",
         f"- API-confirmed Page name: `{status['facebook_page_name_confirmed'] or 'not confirmed'}`",
@@ -154,7 +240,9 @@ def cmd_report(args) -> int:
         "- Duplicate URL/content/cluster prevention implemented: PASS (see tests)",
         "- Empty scan publishes nothing: PASS (see tests)",
         f"- Facebook Page identity/targeting: {'PASS (API-confirmed Page ID and name)' if status['facebook_page_id_confirmed'] else 'HOLD (Page identity not API-confirmed)'}",
-        f"- Live Facebook publishing: {'BLOCKED' if CONFIG.dry_run or not CONFIG.publish_enabled else 'ENABLED'} pending operator-approved test post and safety flags",
+        f"- Live Facebook publishing: "
+        f"{'ENABLED' if status['publish_safety_ok'] and status['settings']['facebook_test_post_passed'] == 'true' else 'BLOCKED'}"
+        f" (config safety={status['publish_safety_config_ok']}, API identity={bool(status['facebook_page_id_confirmed'])}, test post={status['settings']['facebook_test_post_passed'] or False})",
         "- GitHub Actions CI/identity/hourly/container workflows: PASS (see reports/LAUNCH_CHECKLIST.md)",
         "- 24/7 operation: requires deployment to a persistent host using the included service/container files",
         "",
@@ -198,8 +286,10 @@ def cmd_selftest(_args) -> int:
          "SourceMonitor exercises Munsif RSS, Etemaad Urdu index, Indian Express feed, and The Wire REST API; outage/snapshot paths are tested."),
         ("PASS", "Stories are fresh and verified before publication",
          "VerificationAgent checks timestamps, official evidence, independent corroboration, claim status and uncertainty; the launch fixture uses an official TGPSC web note."),
-        ("PASS", "No murder/crime-focused stories are published",
-         "Explicit exclusion regexes and a crime-headline regression test block the category."),
+        ("PASS", "No crime-focused stories are published",
+         "Expanded no-crime exclusion regexes at ingest, verification and generated editorial stages, with regression tests."),
+        ("PASS", "More political news with regional-first ordering",
+         "Additive priority ranks regional politics first, then national/international politics, then development; jobs are claimed by priority."),
         ("PASS", "Urdu summaries preserve original facts",
          "Bilingual fixture copy, entity/number fact inventory, and numeric consistency checks."),
         ("PASS", "Roman Urdu matches approved Urdu",
@@ -267,9 +357,14 @@ def build_parser() -> argparse.ArgumentParser:
     worker.set_defaults(func=cmd_worker)
     fixture = sub.add_parser("fixture")
     fixture.add_argument("--path", default=str(ROOT / "tests/fixtures/verified_tgpsc_story.json"))
-    fixture.add_argument("--live", action="store_true", help="Do not use; fixture must never be published live")
+    fixture.add_argument("--live", action="store_true",
+                         help="Internal use by bootstrap-test-post; creates a pending editorial, does not publish")
     fixture.set_defaults(func=cmd_fixture)
     sub.add_parser("verify-facebook").set_defaults(func=cmd_verify_facebook)
+    bootstrap = sub.add_parser("bootstrap-test-post")
+    bootstrap.add_argument("--fixture", default=str(ROOT / "tests/fixtures/verified_tgpsc_story.json"))
+    bootstrap.add_argument("--i-understand-this-posts-publicly", action="store_true")
+    bootstrap.set_defaults(func=cmd_bootstrap_test_post)
     test_publish = sub.add_parser("test-publish")
     test_publish.add_argument("--editorial-id", required=True)
     test_publish.add_argument("--i-understand-this-posts-publicly", action="store_true")
