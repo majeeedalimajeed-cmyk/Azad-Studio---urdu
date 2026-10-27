@@ -1,9 +1,10 @@
 """Official Meta Graph API v26.0 client and Page identity verification.
 
 The configured Facebook profile URL, an explicit NR_FB_PAGE_ID, or the exact
-expected Page name are used ONLY as lookup hints against /me/accounts.
-Publishing always uses the Page ID confirmed by the API and stored in the
-durable settings table.
+expected Page name are used ONLY as lookup hints against /me/accounts. When the
+user token is unavailable or expired, the long-lived Page token can confirm the
+same identity directly. Publishing always uses the Page ID confirmed by the API
+and stored in the durable settings table.
 """
 from __future__ import annotations
 
@@ -160,19 +161,16 @@ class FacebookGraphClient:
         return {"ok": True, "page_id": page_id, "page_name": name, "permissions": sorted(granted), "tasks": sorted(tasks)}
 
     def _verify_with_page_token(self, user_error: GraphAPIError | None) -> dict[str, Any]:
-        """Fallback for an expired/missing user token on a previously confirmed Page.
+        """Fallback for an expired/missing user token using a long-lived Page token.
 
         The Page token is checked directly against the configured Page ID and
-        exact expected name. A fresh database with no prior API confirmation
-        still requires a working user token for the initial /me/accounts check.
+        exact expected name. It must also expose the required Page tasks or the
+        required permissions; otherwise identity remains unconfirmed.
         """
         page_id = self.config.facebook_page_id or self.db.get_setting("facebook_page_id")
         stored_id = self.db.get_setting("facebook_page_id")
-        previously_verified = bool(self.db.get_setting("facebook_identity_verified_at"))
         if not page_id:
-            return {"ok": False, "reason": "User token unavailable and no API-confirmed Page ID is available for Page-token verification."}
-        if not previously_verified:
-            return {"ok": False, "reason": "User token unavailable and this database has no prior API-confirmed Page identity."}
+            return {"ok": False, "reason": "User token unavailable and no configured/API-confirmed Page ID is available for Page-token verification."}
         if stored_id and str(stored_id) != str(page_id):
             return {"ok": False, "reason": "Configured Page ID does not match the previously API-confirmed Page ID."}
 
@@ -194,13 +192,6 @@ class FacebookGraphClient:
             return {"ok": False, "reason": reason}
 
         tasks = {str(x).upper() for x in confirmed.get("tasks", []) or []}
-        if tasks:
-            missing_tasks = sorted(self.REQUIRED_TASKS - tasks)
-            if missing_tasks:
-                reason = "Page token reports missing required tasks: " + ", ".join(missing_tasks)
-                self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
-                return {"ok": False, "reason": reason}
-
         granted: dict[str, str] = {}
         try:
             perm_payload = self._call("GET", "/me/permissions", token=self.config.facebook_page_token or "")
@@ -209,10 +200,26 @@ class FacebookGraphClient:
                 for p in perm_payload.get("data", []) if isinstance(p, dict)
             }
         except GraphAPIError:
-            # Page tokens do not always expose /me/permissions. The earlier full
-            # user-token verification and the direct Page-token check remain the
-            # authoritative identity evidence.
+            # Page tokens do not always expose /me/permissions; tasks from the
+            # direct Page read can confirm the role instead.
             granted = {}
+
+        if tasks:
+            missing_tasks = sorted(self.REQUIRED_TASKS - tasks)
+            if missing_tasks:
+                reason = "Page token reports missing required tasks: " + ", ".join(missing_tasks)
+                self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
+                return {"ok": False, "reason": reason}
+        if granted:
+            missing_permissions = [p for p in self.REQUIRED_PERMISSIONS if granted.get(p) != "granted"]
+            if missing_permissions:
+                reason = "Page token reports missing required permissions: " + ", ".join(missing_permissions)
+                self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
+                return {"ok": False, "reason": reason}
+        if not tasks and not granted:
+            reason = "Page token did not return the required tasks or permissions."
+            self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
+            return {"ok": False, "reason": reason}
 
         self.db.set_setting("facebook_page_id", str(page_id))
         self.db.set_setting("facebook_page_name", name)
@@ -222,7 +229,7 @@ class FacebookGraphClient:
         self.db.set_setting("facebook_identity_method", "page_token_fallback")
         self.db.insert_api_event(
             "facebook", "verify_page_token_fallback", "ok",
-            "Previously confirmed Page re-verified directly with the Page token.",
+            "Page identity re-verified directly with the long-lived Page token.",
             details={"page_id": page_id, "page_name": name, "tasks": sorted(tasks),
                      "permissions": sorted(granted),
                      "user_token_error": redact(str(user_error) if user_error else "missing", self.config.secret_values)},

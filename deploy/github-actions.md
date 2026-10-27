@@ -12,7 +12,7 @@ This repository uses **repository secrets** for credentials and **repository var
 | `GROK_API_KEY` | xAI API key | `NR_LLM_API_KEY` |
 | `OPENAI_API_KEY` | Optional fallback key | `NR_LLM_API_KEY` fallback |
 
-The long-lived Page token belongs in `FB_PAGE_ACCESS_TOKEN`. `FB_USER_ACCESS_TOKEN` should be a long-lived user token for the initial `/me/accounts` identity check and feed reconciliation; GitHub secret values are write-only, so do not paste them into chat, source, or logs. If the user token expires after the Page has already been API-confirmed, `FacebookGraphClient.verify_identity()` falls back to the Page token and the previously confirmed Page ID/name stored in the durable SQLite cache. Refresh `FB_USER_ACCESS_TOKEN` when convenient to restore full `/me/accounts` and feed-reconciliation coverage.
+The long-lived Page token belongs in `FB_PAGE_ACCESS_TOKEN`. `FB_USER_ACCESS_TOKEN` should be a long-lived user token for the initial `/me/accounts` identity check and feed reconciliation; GitHub secret values are write-only, so do not paste them into chat, source, or logs. If the user token expires, `FacebookGraphClient.verify_identity()` falls back to the Page token, configured Page ID, exact expected name, and required Page tasks/permissions, so a fresh cache can bootstrap from a valid Page token alone. Refresh `FB_USER_ACCESS_TOKEN` when convenient to restore full `/me/accounts` and feed-reconciliation coverage.
 
 ## Variables
 

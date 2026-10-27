@@ -346,7 +346,7 @@ def test_page_token_fallback_after_user_token_expiry(tmp_path):
     assert db.get_setting("facebook_identity_method") == "page_token_fallback"
 
 
-def test_page_token_fallback_requires_prior_confirmation(tmp_path):
+def test_page_token_fallback_works_on_fresh_db_with_tasks(tmp_path):
     cfg = temp_config(tmp_path, expected_page_name="Azad Studio", facebook_page_id="123456789",
                       facebook_user_token="expired-user", facebook_page_token="valid-page")
     db = Database(cfg.db_path)
@@ -355,11 +355,35 @@ def test_page_token_fallback_requires_prior_confirmation(tmp_path):
         def _call(self, method, path, *, token, params=None, data=None, files=None):
             if path in {"/me/accounts", "/me/permissions"}:
                 raise GraphAPIError("Session has expired", status=401, code="190")
+            if path == "/123456789":
+                return {"id": "123456789", "name": "Azad Studio ",
+                        "link": "https://www.facebook.com/123456789",
+                        "tasks": ["CREATE_CONTENT", "MANAGE", "MODERATE"]}
+            return {}
+
+    result = FakeGraph(db, cfg).verify_identity()
+    assert result["ok"] is True
+    assert result["identity_method"] == "page_token_fallback"
+
+
+def test_page_token_fallback_requires_tasks_or_permissions(tmp_path):
+    cfg = temp_config(tmp_path, expected_page_name="Azad Studio", facebook_page_id="123456789",
+                      facebook_user_token="expired-user", facebook_page_token="valid-page")
+    db = Database(cfg.db_path)
+    db.set_setting("facebook_identity_verified_at", iso())
+
+    class FakeGraph(FacebookGraphClient):
+        def _call(self, method, path, *, token, params=None, data=None, files=None):
+            if path in {"/me/accounts", "/me/permissions"}:
+                raise GraphAPIError("Session has expired", status=401, code="190")
+            if path == "/123456789":
+                return {"id": "123456789", "name": "Azad Studio ",
+                        "link": "https://www.facebook.com/123456789"}
             return {}
 
     result = FakeGraph(db, cfg).verify_identity()
     assert result["ok"] is False
-    assert "prior API-confirmed" in result["reason"]
+    assert "tasks or permissions" in result["reason"]
 
 
 def test_graph_api_error_is_recorded_without_false_success(tmp_path):

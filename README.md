@@ -1,6 +1,6 @@
 # AZAD STUDIO — continuous AI-assisted news operation
 
-**Status: DRY RUN. No public post has been made. Unattended publishing must stay disabled until the launch checklist is complete.**
+**Status: AUTO POST MODE ENABLED. One operator-approved public test post is live on the AZAD STUDIO Page. Continuous generation is currently blocked because both Facebook tokens expired at 23:30 IST and no working LLM gateway is configured; see `reports/LAUNCH_CHECKLIST.md`. To stop, set `NR_AUTO_POST_ENABLED=false`.**
 
 This is the AZAD STUDIO newsroom operation. The supplied reference card used an NR monogram; that exact asset is retained byte-for-byte and unchanged. Only the textual brand name has been updated to AZAD STUDIO. It publishes only to the API-confirmed Facebook Page `Azad Studio` (ID `1383450338187017`, `https://www.facebook.com/1383450338187017`). The original `https://www.facebook.com/profile.php?id=61595929711037` remains only as a lookup hint and audit note.
 
@@ -66,7 +66,7 @@ Database tables include `source_status`, `clusters`, `candidates`, `review_queue
 - Required permissions/tasks include `pages_manage_posts`, `pages_read_engagement`, `pages_show_list`, and Page tasks `CREATE_CONTENT`, `MANAGE`, `MODERATE`. Confirm them in Meta's [permissions reference](https://developers.facebook.com/docs/permissions).
 - The numeric profile ID `61595929711037` is **not** assumed to be a Page ID. `FacebookGraphClient.verify_identity()` resolves the configured profile URL, an explicit `NR_FB_PAGE_ID`, or the exact expected Page name via `/me/accounts`; it verifies required permissions/tasks, checks the Page token against `/{page_id}`, and stores the confirmed Page ID/name/time in the database.
 - Dry-run Graph API verification has confirmed the publishing identity as **Page ID `1383450338187017`**, name **`Azad Studio`**, canonical link `https://www.facebook.com/1383450338187017`. The original profile URL is kept only as a lookup hint/audit note.
-- If the short-lived user token expires, the previously API-confirmed Page is re-verified directly with the long-lived Page token and the stored Page ID/name. A fresh database still requires a working user token for the initial identity check. Refresh `FB_USER_ACCESS_TOKEN` to restore full `/me/accounts` and feed reconciliation.
+- If the short-lived user token expires, the Page is re-verified directly with the long-lived Page token, the configured Page ID, the exact expected name, and required Page tasks/permissions. A fresh database can therefore bootstrap from a valid Page token alone. Refresh `FB_USER_ACCESS_TOKEN` when convenient to restore full `/me/accounts` and feed reconciliation.
 - Live publishing additionally requires `NR_DRY_RUN=false`, `NR_PUBLISH_ENABLED=true`, `NR_PUBLISH_SAFETY_OK=true`, `NR_OPERATOR_APPROVED=true`, `NR_VERIFY_APPROVED=true`, `NR_AUTO_APPROVE_VERIFIED=true`, `NR_AUTO_POST_ENABLED=true`, a passed visual inspection, `NR_FB_USER_ACCESS_TOKEN`, `NR_FB_PAGE_ACCESS_TOKEN`, `NR_FB_PAGE_ID`, `NR_EXPECTED_PAGE_NAME`, API-confirmed Page identity, and an operator-approved successful test post. `NR_AUTO_POST_ENABLED` is the continuous auto-post kill switch; set it to `false` to stop.
 - Secrets are read from environment variables or `*_FILE` paths. They are never written to source, logs, captions, cards, or prompts.
 
