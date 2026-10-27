@@ -33,6 +33,32 @@ jobs:
       - name: Initialize audit database
         run: python -m nr_news.cli init
 
+      - name: Inspect Page token
+        env:
+          NR_FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          NR_FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          NR_GRAPH_API_VERSION: ${{ vars.NR_GRAPH_API_VERSION || 'v26.0' }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+          token = os.getenv("NR_FB_PAGE_ACCESS_TOKEN") or ""
+          page_id = os.getenv("NR_FB_PAGE_ID") or ""
+          version = os.getenv("NR_GRAPH_API_VERSION") or "v26.0"
+          base = "https://graph.facebook.com/" + version
+
+          def safe(text: str) -> str:
+              return text.replace(token, "[REDACTED]")[:600]
+
+          for path in ["/me", "/" + page_id, "/" + page_id + "/feed"]:
+              try:
+                  r = requests.get(base + path, params={"fields": "id,name,message,created_time"},
+                                   headers={"Authorization": "Bearer " + token}, timeout=30)
+                  print("PAGE_TOKEN_CHECK", path, "HTTP", r.status_code, safe(r.text))
+              except Exception as exc:
+                  print("PAGE_TOKEN_CHECK", path, "network error", type(exc).__name__)
+          PY
+
       - name: Resolve and confirm Page via Graph API
         env:
           NR_SKIP_DOTENV: "1"
