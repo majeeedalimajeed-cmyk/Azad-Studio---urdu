@@ -19,7 +19,7 @@ from nr_news.facebook import FacebookGraphClient, GraphAPIError
 from nr_news.models import Candidate, EditorialContent, SourceResult
 from nr_news.pipeline import NewsPipeline
 from nr_news.pixabay import PixabayClient
-from nr_news.renderer import CardRenderer, verify_logo
+from nr_news.renderer import BYLINE, CardRenderer, verify_logo
 from nr_news.service import PersistentScheduler
 from nr_news.util import iso, utcnow
 
@@ -478,6 +478,8 @@ def test_two_photo_card_layout_passes_visual_inspection(tmp_path):
     assert card.audit["media_count"] == 2
     assert card.audit["visual_inspection"]["checks"]["photo_1_pixels"] is True
     assert card.audit["visual_inspection"]["checks"]["photo_2_pixels"] is True
+    assert card.audit["byline"] == BYLINE
+    assert card.audit["visual_inspection"]["checks"]["byline_pixels"] is True
 
 
 def test_pixabay_query_uses_relevant_story_terms():
@@ -517,3 +519,23 @@ def test_media_agent_fills_two_photos_from_pixabay(tmp_path):
     assert len(approved) == 2
     assert {m["provider"] for m in approved} == {"demo"}
     assert db.query("SELECT COUNT(*) AS n FROM media_assets")[0]["n"] == 2
+
+
+def test_text_led_card_has_operator_byline(tmp_path):
+    cfg = temp_config(tmp_path)
+    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    ed = fixture["editorial"]
+    content = EditorialContent(
+        urdu_headline=ed["urdu_headline"],
+        urdu_bullets=ed["urdu_bullets"],
+        roman_headline=ed["roman_headline"],
+        roman_bullets=ed["roman_bullets"],
+        verification_notes=ed.get("verification_notes", []),
+        source_urls=ed.get("source_urls", []),
+        publication_time=iso(),
+        media=None,
+    )
+    cards = CardRenderer(cfg).render_cards(content, "text-led-byline-test")
+    assert cards[0].audit["byline"] == BYLINE
+    assert cards[0].audit["visual_inspection"]["checks"]["byline_pixels"] is True
+    assert cards[0].audit["media_count"] == 0

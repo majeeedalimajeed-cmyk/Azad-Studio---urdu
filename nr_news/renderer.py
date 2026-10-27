@@ -21,6 +21,7 @@ from .models import EditorialContent
 from .util import iso, json_dumps, redact, sha256_file, sha256_text, utcnow
 
 WIDTH, HEIGHT = 1080, 1350
+BYLINE = "By - Abu Aimal and Aimal Akram"
 BLACK = (5, 5, 6)
 PANEL = (12, 11, 10)
 GOLD = (226, 184, 74)
@@ -192,7 +193,7 @@ class CardRenderer:
                         compact: bool = False) -> tuple[list[list[str]], int, int]:
         fnt = self._font(rtl, size, "SemiBold" if rtl else "Medium")
         line_height = max(26 if compact else 32, round(size * line_height_factor))
-        gap = 14 if compact else 22
+        gap = 14 if compact else 18
         groups = [self.wrap(draw, b, fnt, max_width, rtl) for b in bullets]
         total = sum(len(g) * line_height + gap for g in groups)
         return groups, total, line_height
@@ -246,19 +247,20 @@ class CardRenderer:
         d.rounded_rectangle((x0 + 8, 53, x0 + 32, 79), radius=4, outline=GOLD_LIGHT, width=2)
         d.line((x0 + 8, 61, x0 + 32, 61), fill=GOLD_LIGHT, width=2)
 
-    def _draw_headline(self, canvas: Image.Image, text: str, rtl: bool, y: int) -> None:
+    def _draw_headline(self, canvas: Image.Image, text: str, rtl: bool, y: int,
+                       height: int = 92) -> None:
         d = ImageDraw.Draw(canvas)
-        box = (38, y, WIDTH - 38, y + 104)
+        box = (38, y, WIDTH - 38, y + height)
         angled_banner(canvas, box, gradient((box[2] - box[0], box[3] - box[1]), GOLD_LIGHT, GOLD))
-        sizes = [44, 41, 38, 35, 32] if rtl else [46, 43, 40, 37, 34, 31]
+        sizes = [40, 37, 34, 31, 28] if rtl else [42, 39, 36, 33, 30, 27]
         max_width = 900
         for size in sizes:
             f = self._font(rtl, size, "Bold")
             lines = self.wrap(d, text, f, max_width, rtl)
             if len(lines) <= 2 and all(self._text_length(d, line, f, rtl) <= max_width for line in lines):
-                line_h = size * (1.65 if rtl else 1.13)
+                line_h = size * (1.45 if rtl else 1.05)
                 total_h = len(lines) * line_h
-                start_y = y + (104 - total_h) / 2 + (-10 if rtl else 0)
+                start_y = y + (height - total_h) / 2 + (-8 if rtl else 0)
                 for idx, line in enumerate(lines):
                     x = WIDTH - 70 if rtl else 75
                     d.text((x, start_y + idx * line_h), isolate_latin(line) if rtl else line,
@@ -272,7 +274,7 @@ class CardRenderer:
                       compact: bool = False) -> int:
         d = ImageDraw.Draw(canvas)
         groups, fnt, line_height = self.fit_bullets(d, bullets, max_width, max_height, rtl, compact)
-        gap = 14 if compact else 22
+        gap = 14 if compact else 18
         y = y0
         for lines in groups:
             d.ellipse((bullet_x - 9, y + 9, bullet_x + 9, y + 22), fill=GOLD)
@@ -325,17 +327,34 @@ class CardRenderer:
         brand_font = self._font(False, 19, "SemiBold")
         d.text((190, 128), "AZAD STUDIO", font=brand_font, fill=MUTED, anchor="la")
 
-        # Main heading must remain exactly LATEST NEWS.
-        red_box = (35, 172, WIDTH - 35, 264)
-        angled_banner(canvas, red_box, gradient((red_box[2] - red_box[0], red_box[3] - red_box[1]), RED_LIGHT, RED), border=GOLD_LIGHT)
-        heading_font = self._font(False, 62, "ExtraBold")
-        d.text((112, 185), "LATEST NEWS", font=heading_font, fill=WHITE, stroke_width=1, stroke_fill=(60, 0, 0))
-        # Megaphone icon, drawn programmatically.
-        d.polygon([(50, 205), (68, 205), (84, 192), (84, 235), (68, 224), (50, 224)], fill=WHITE)
-        d.arc((48, 214, 70, 248), 270, 90, fill=WHITE, width=4)
+        # Compact vertical rhythm: the LATEST NEWS banner and both news sections
+        # are slightly smaller, leaving clean space for the byline below the logo.
+        heading_y, heading_h = 166, 74
+        urdu_headline_y, headline_h = 258, 92
+        urdu_label_y = 366
+        urdu_bullets_y, urdu_bullets_h = 398, 284
+        urdu_photo_box = (585, 386, 1035, 590)
+        separator_y = 704
+        roman_headline_y = 734
+        roman_label_y = 846
+        roman_bullets_y, roman_bullets_h = 878, 280
+        roman_photo_box = (585, 866, 1035, 1070)
+        bottom_logo_y = 1178
+        byline_y = 1262
+        footer_y = 1308
 
-        self._draw_headline(canvas, content.urdu_headline, True, 290)
-        d.text((WIDTH - 70, 410), "URDU SUMMARY", font=self._font(False, 21, "Bold"),
+        # Main heading must remain exactly LATEST NEWS.
+        red_box = (35, heading_y, WIDTH - 35, heading_y + heading_h)
+        angled_banner(canvas, red_box, gradient((red_box[2] - red_box[0], red_box[3] - red_box[1]), RED_LIGHT, RED), border=GOLD_LIGHT)
+        heading_font = self._font(False, 54, "ExtraBold")
+        d.text((112, heading_y + 10), "LATEST NEWS", font=heading_font, fill=WHITE, stroke_width=1, stroke_fill=(60, 0, 0))
+        # Megaphone icon, drawn programmatically.
+        d.polygon([(50, heading_y + 26), (68, heading_y + 26), (84, heading_y + 14),
+                   (84, heading_y + 51), (68, heading_y + 42), (50, heading_y + 42)], fill=WHITE)
+        d.arc((48, heading_y + 36, 70, heading_y + 66), 270, 90, fill=WHITE, width=4)
+
+        self._draw_headline(canvas, content.urdu_headline, True, urdu_headline_y, headline_h)
+        d.text((WIDTH - 70, urdu_label_y), "URDU SUMMARY", font=self._font(False, 20, "Bold"),
                fill=MUTED, anchor="ra")
 
         # Up to two rights-cleared photos occupy reserved panels, mirroring the
@@ -347,50 +366,52 @@ class CardRenderer:
         urdu_text_x = WIDTH - 135
         urdu_bullet_x = 1025
         if urdu_photo:
-            urdu_box = (585, 432, 1035, 646)
-            self._draw_photo(canvas, urdu_photo, urdu_box)
-            photo_boxes.append(urdu_box)
+            self._draw_photo(canvas, urdu_photo, urdu_photo_box)
+            photo_boxes.append(urdu_photo_box)
             urdu_max_width = 490
             urdu_text_x = 555
             urdu_bullet_x = 575
-        urdu_end = self._draw_bullets(canvas, urdu_bullets, True, 446, 300, urdu_max_width,
+        urdu_end = self._draw_bullets(canvas, urdu_bullets, True, urdu_bullets_y,
+                                      urdu_bullets_h, urdu_max_width,
                                       urdu_text_x, urdu_bullet_x, compact=bool(urdu_photo))
-        if urdu_end > 748:
+        if urdu_end > 700:
             raise LayoutError("Urdu bullet area overflowed its reserved region")
 
         # Separator with diamond.
-        d.line((58, 752, 500, 752), fill=GOLD_DARK, width=3)
-        d.line((580, 752, WIDTH - 58, 752), fill=GOLD_DARK, width=3)
-        diamond = [(540, 735), (558, 752), (540, 769), (522, 752)]
+        d.line((58, separator_y, 500, separator_y), fill=GOLD_DARK, width=3)
+        d.line((580, separator_y, WIDTH - 58, separator_y), fill=GOLD_DARK, width=3)
+        diamond = [(540, separator_y - 17), (558, separator_y), (540, separator_y + 17), (522, separator_y)]
         d.polygon(diamond, fill=GOLD)
 
-        self._draw_headline(canvas, content.roman_headline, False, 790)
-        d.text((70, 907), "ROMAN URDU", font=self._font(False, 23, "Bold"), fill=MUTED)
+        self._draw_headline(canvas, content.roman_headline, False, roman_headline_y, headline_h)
+        d.text((70, roman_label_y), "ROMAN URDU", font=self._font(False, 22, "Bold"), fill=MUTED)
         roman_max_width = 900
         roman_text_x = 135
         roman_bullet_x = 88
         if roman_photo:
-            roman_box = (585, 930, 1035, 1144)
-            self._draw_photo(canvas, roman_photo, roman_box)
-            photo_boxes.append(roman_box)
+            self._draw_photo(canvas, roman_photo, roman_photo_box)
+            photo_boxes.append(roman_photo_box)
             roman_max_width = 450
             roman_text_x = 120
             roman_bullet_x = 88
-        roman_end = self._draw_bullets(canvas, roman_bullets, False, 946, 294,
-                                       roman_max_width, roman_text_x, roman_bullet_x,
-                                       compact=bool(roman_photo))
-        if roman_end > 1245:
+        roman_end = self._draw_bullets(canvas, roman_bullets, False, roman_bullets_y,
+                                       roman_bullets_h, roman_max_width, roman_text_x,
+                                       roman_bullet_x, compact=bool(roman_photo))
+        if roman_end > 1165:
             raise LayoutError("Roman Urdu bullet area overflowed its reserved region")
 
-        bottom_logo_box = paste_logo(canvas, logo, WIDTH // 2, 1238, 62)
+        bottom_logo_box = paste_logo(canvas, logo, WIDTH // 2, bottom_logo_y, 62)
+        byline_box = (250, byline_y - 22, 830, byline_y + 22)
+        byline_font = self._font(False, 18, "SemiBold")
+        d.text((WIDTH // 2, byline_y), BYLINE, font=byline_font, fill=GOLD, anchor="mm")
         footer_font = self._font(False, 15, "Medium")
         footer = f"VERIFIED REPORT  •  {page_number}/{page_count}  •  AZAD STUDIO"
-        d.text((WIDTH // 2, 1318), footer, font=footer_font, fill=MUTED, anchor="mm")
+        d.text((WIDTH // 2, footer_y), footer, font=footer_font, fill=MUTED, anchor="mm")
 
         canvas.save(output_path, format="PNG", optimize=True)
         digest = sha256_file(output_path)
         visual = self.visual_inspection(output_path, top_logo_box, bottom_logo_box,
-                                        photo_boxes=photo_boxes)
+                                        photo_boxes=photo_boxes, byline_box=byline_box)
         audit = {
             "rendered_at": iso(),
             "logo_asset": str(self.config.logo_path),
@@ -402,6 +423,7 @@ class CardRenderer:
             "latin_font": self.config.latin_font_path.name,
             "rtl_engine": "libraqm",
             "heading": "LATEST NEWS",
+            "byline": BYLINE,
             "page_number": page_number,
             "page_count": page_count,
             "media": photos,
@@ -418,7 +440,8 @@ class CardRenderer:
 
     def visual_inspection(self, path: Path, top_box: tuple[int, int, int, int],
                           bottom_box: tuple[int, int, int, int],
-                          photo_boxes: list[tuple[int, int, int, int]] | None = None) -> dict[str, Any]:
+                          photo_boxes: list[tuple[int, int, int, int]] | None = None,
+                          byline_box: tuple[int, int, int, int] | None = None) -> dict[str, Any]:
         with Image.open(path) as im:
             size = im.size
             rgb = im.convert("RGB")
@@ -429,6 +452,8 @@ class CardRenderer:
             "logo_top_pixels": _gold_pixel_count(rgb, top_box) > 100,
             "logo_bottom_pixels": _gold_pixel_count(rgb, bottom_box) > 60,
         }
+        if byline_box:
+            checks["byline_pixels"] = _gold_pixel_count(rgb, byline_box) > 40
         for idx, box in enumerate(photo_boxes or [], 1):
             checks[f"photo_{idx}_pixels"] = _photo_pixel_count(rgb, box) > 1000
         return {"passed": all(checks.values()), "checks": checks}

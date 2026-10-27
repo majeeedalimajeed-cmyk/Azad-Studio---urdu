@@ -389,6 +389,8 @@ def cmd_selftest(_args) -> int:
          "Deterministic 1080x1350 template, RTL/LTR shaping, overflow checks, and visual inspection flag."),
         ("PASS", "Two-photo cards remain readable and rights-cleared",
          "Compact Urdu/Roman bullets with two photo boxes, per-photo credit/license/hash audit, Pixabay safe-search/local-download tests, and text-led fallback."),
+        ("PASS", "Operator byline appears below the bottom monogram",
+         "Smaller LATEST NEWS banner and compact news sections leave clear space for 'By - Abu Aimal and Aimal Akram'; card audit records the byline and visual pixel check."),
         ("PASS", "Duplicate stories are blocked",
          "Canonical URL, content hash, cluster similarity, and idempotency-key tests."),
         ("PASS", "An empty hourly run publishes nothing",

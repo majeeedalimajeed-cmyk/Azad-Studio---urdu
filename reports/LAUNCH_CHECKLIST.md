@@ -17,8 +17,8 @@ The textual brand is AZAD STUDIO; the supplied NR monogram and layout remain unc
   - Card: `data/cards/2026-10-27-4ee3e37504ab-1.png`
   - Evidence: `reports/TEST_POST_RESULT.md`, workflow run `40555660776`.
 - Exact supplied monogram SHA-256 `d0b02c4e7f31f4f58d1e48c08fd3c8d6668bcbbe9e15ef0652a6ff584ede2b3d` verified; 1080×1350 RTL Urdu / LTR Roman Urdu card passed visual inspection.
-- Local tests: `23 passed`. `check-assets` passes with `raqm_available:true`.
-- Two-photo card integration is implemented: source-supplied rights-cleared photos first, then relevant safe-search Pixabay Content License photos downloaded locally, credited, cached, and audited. Compact bullet layout keeps the two news-image boxes readable; a text-led card remains the fallback. `verify-pixabay.yml` renders a non-published demo without printing the key.
+- Local tests: `24 passed`. `check-assets` passes with `raqm_available:true`.
+- Two-photo card integration is implemented: source-supplied rights-cleared photos first, then relevant safe-search Pixabay Content License photos downloaded locally, credited, cached, and audited. The `LATEST NEWS` banner and both news sections are somewhat smaller; compact bullets keep the two news-image boxes readable and leave space for **By - Abu Aimal and Aimal Akram** below the bottom monogram. A text-led card remains the fallback. `verify-pixabay.yml` renders a non-published demo without printing the key.
 - Stop mechanism: `deploy/STOP_AUTO_POSTING.md` and `deploy/toggle_auto_posting.py --stop`. Setting `NR_AUTO_POST_ENABLED=false` (and `NR_PUBLISH_ENABLED=false`) stops new public posts.
 
 ## Current blockers — action required
@@ -59,8 +59,8 @@ Because of blocker 2, the hourly workflow will not invent or publish unverified 
 | Facebook tokens | HOLD | Both expired; replace with long-lived tokens. |
 | LLM gateway | HOLD | Grok key invalid; OpenAI key has no credits. |
 | Exact supplied monogram / fonts | PASS | `check-assets` passes. |
-| Offline unit/integration tests | PASS | `23 passed`. |
-| Two-photo / Pixabay integration | PARTIAL | Offline layout and rights tests pass in local commit `dada7bf`; synthetic two-photo layout preview at `data/cards/two-photo-layout-demo-1.png` passed visual inspection. Push and `verify-pixabay.yml` are pending because the GitHub PAT is no longer persisted in the workspace. |
+| Offline unit/integration tests | PASS | `24 passed`. |
+| Two-photo / Pixabay integration | PARTIAL | Offline layout, rights, and byline tests pass in local commits `dada7bf` / `9dbe99b` plus uncommitted v2 layout edits; synthetic two-photo layout preview at `data/cards/two-photo-layout-demo-v2-1.png` passed visual inspection. Push and `verify-pixabay.yml` are pending because the GitHub PAT is no longer persisted in the workspace. |
 | GitHub Actions workflows | PARTIAL | CI, identity (pre-expiry), container, hourly dry-run, public test post, and LLM verification all ran; current hourly auto run is blocked by token expiry. Pixabay demo workflow is ready for dispatch. |
 | Direct source access | PARTIAL | Munsif, Etemaad, and The Wire work. Indian Express returns CloudFront 403 and uses a non-publishable snapshot only. |
 | Human review workflow | READY | Review queue and CLI/API approval exist; auto-approval only applies to verified editorials under the explicit auto-post flags. |
