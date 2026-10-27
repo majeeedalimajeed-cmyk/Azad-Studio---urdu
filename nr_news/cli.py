@@ -112,8 +112,11 @@ def cmd_report(args) -> int:
         f"- Dry run: `{CONFIG.dry_run}`",
         f"- Public publishing enabled: `{CONFIG.publish_enabled}`",
         f"- Page identity API-confirmed: `{bool(status['facebook_page_id_confirmed'])}`",
+        f"- API-confirmed Page ID: `{status['facebook_page_id_confirmed'] or 'not confirmed'}`",
+        f"- API-confirmed Page name: `{status['facebook_page_name_confirmed'] or 'not confirmed'}`",
         f"- Operator-approved test post passed: `{status['settings']['facebook_test_post_passed'] or False}`",
-        f"- Only Facebook destination: {CONFIG.facebook_page_url}",
+        f"- API-confirmed Page link: `{db.get_setting('facebook_page_url') or 'not confirmed'}`",
+        f"- Configured profile URL lookup hint: {CONFIG.facebook_page_url}",
         f"- Graph API version: `{CONFIG.graph_api_version}`",
         f"- LLM configured: `{status['llm_configured']}`",
         f"- Exact supplied monogram SHA-256: `{CONFIG.logo_sha256}`",
@@ -150,7 +153,8 @@ def cmd_report(args) -> int:
         "- Crime and rumor exclusion rules implemented: PASS (see tests)",
         "- Duplicate URL/content/cluster prevention implemented: PASS (see tests)",
         "- Empty scan publishes nothing: PASS (see tests)",
-        "- Facebook publishing: BLOCKED pending Page identity, credentials and approved test post",
+        f"- Facebook Page identity/targeting: {'PASS (API-confirmed Page ID and name)' if status['facebook_page_id_confirmed'] else 'HOLD (Page identity not API-confirmed)'}",
+        f"- Live Facebook publishing: {'BLOCKED' if CONFIG.dry_run or not CONFIG.publish_enabled else 'ENABLED'} pending operator-approved test post and safety flags",
         "- 24/7 operation: requires deployment to a persistent host using the included service/container files",
         "",
     ]
@@ -177,6 +181,17 @@ def cmd_selftest(_args) -> int:
         print(result.stderr, end="", file=sys.stderr)
     if result.returncode != 0:
         return result.returncode
+    db = Database(CONFIG.db_path)
+    identity_verified = bool(db.get_setting("facebook_identity_verified_at"))
+    confirmed_page_id = db.get_setting("facebook_page_id")
+    confirmed_page_name = db.get_setting("facebook_page_name")
+    identity_status = "PASS" if identity_verified else "HOLD"
+    identity_evidence = (
+        f"Graph API confirmed Page ID {confirmed_page_id} and name {confirmed_page_name!r}; "
+        "the configured profile URL is retained only as a lookup hint."
+        if identity_verified else
+        "Only the configured profile URL is accepted; API-confirmed Page ID/name, exact expected name, permissions and token still require live credentials."
+    )
     checks = [
         ("PASS", "All four sources monitored",
          "SourceMonitor exercises Munsif RSS, Etemaad Urdu index, Indian Express feed, and The Wire REST API; outage/snapshot paths are tested."),
@@ -198,8 +213,7 @@ def cmd_selftest(_args) -> int:
          "Empty-scan test asserts zero cards, zero captions, and zero publish attempts."),
         ("PASS", "Breaking-news verification starts promptly",
          "Fresh-candidate breaking test enqueues a priority verification job."),
-        ("HOLD", "Facebook publishing targets only the correct Page",
-         "Only the configured profile URL is accepted; API-confirmed Page ID/name, exact expected name, permissions and token still require live credentials."),
+        (identity_status, "Facebook publishing targets only the correct Page", identity_evidence),
         ("PASS", "API results, errors and retries are recorded",
          "Graph API errors, publish attempts, post IDs, source URLs and job retries are logged; success always requires an API post ID."),
     ]
@@ -222,7 +236,7 @@ def cmd_selftest(_args) -> int:
     lines += [f"| {status} | {name} | {evidence} |" for status, name, evidence in checks]
     lines += [
         "",
-        "The HOLD item is intentional: live publishing must not be enabled until Page ownership, exact Page identity, permissions, token, and an operator-approved test post are confirmed.",
+        "Live publishing remains disabled until operator approval, all safety flags, and an operator-approved test post are confirmed, even when Page identity is API-verified.",
         "",
     ]
     out = ROOT / "reports" / "TEST_RESULTS.md"

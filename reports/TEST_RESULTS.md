@@ -6,7 +6,7 @@ Command: `python3 -m pytest -q tests`
 
 ```text
 .............                                                            [100%]
-13 passed in 2.22s
+13 passed in 2.42s
 ```
 
 ## Required behavior checks
@@ -23,7 +23,7 @@ Command: `python3 -m pytest -q tests`
 | PASS | Duplicate stories are blocked | Canonical URL, content hash, cluster similarity, and idempotency-key tests. |
 | PASS | An empty hourly run publishes nothing | Empty-scan test asserts zero cards, zero captions, and zero publish attempts. |
 | PASS | Breaking-news verification starts promptly | Fresh-candidate breaking test enqueues a priority verification job. |
-| HOLD | Facebook publishing targets only the correct Page | Only the configured profile URL is accepted; API-confirmed Page ID/name, exact expected name, permissions and token still require live credentials. |
+| PASS | Facebook publishing targets only the correct Page | Graph API confirmed Page ID 1383450338187017 and name 'Azad Studio '; the configured profile URL is retained only as a lookup hint. |
 | PASS | API results, errors and retries are recorded | Graph API errors, publish attempts, post IDs, source URLs and job retries are logged; success always requires an API post ID. |
 
-The HOLD item is intentional: live publishing must not be enabled until Page ownership, exact Page identity, permissions, token, and an operator-approved test post are confirmed.
+Live publishing remains disabled until operator approval, all safety flags, and an operator-approved test post are confirmed, even when Page identity is API-verified.

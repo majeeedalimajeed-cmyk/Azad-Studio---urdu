@@ -1,8 +1,8 @@
 services:
   nr-news:
     build: .
-    image: nr-newsroom:latest
-    container_name: nr-newsroom
+    image: azad-studio-newsroom:latest
+    container_name: azad-studio-newsroom
     restart: unless-stopped
     stop_grace_period: 30s
     ports:
@@ -19,13 +19,14 @@ services:
       NR_GRAPH_API_VERSION: "v26.0"
       NR_PORT: "8000"
       NR_EXPECTED_PAGE_NAME: "${NR_EXPECTED_PAGE_NAME:-}"
-      NR_LLM_API_BASE: "${NR_LLM_API_BASE:-https://api.openai.com/v1}"
-      NR_LLM_MODEL: "${NR_LLM_MODEL:-}"
-      NR_ROMAN_URDU_MODEL: "${NR_ROMAN_URDU_MODEL:-}"
-      NR_VALIDATOR_MODEL: "${NR_VALIDATOR_MODEL:-}"
-      NR_LLM_API_KEY: "${NR_LLM_API_KEY:-}"
-      NR_FB_USER_ACCESS_TOKEN: "${NR_FB_USER_ACCESS_TOKEN:-}"
-      NR_FB_PAGE_ACCESS_TOKEN: "${NR_FB_PAGE_ACCESS_TOKEN:-}"
+      NR_FB_PAGE_ID: "${NR_FB_PAGE_ID:-}"
+      NR_LLM_API_BASE: "${NR_LLM_API_BASE:-https://api.x.ai/v1}"
+      NR_LLM_MODEL: "${NR_LLM_MODEL:-grok-4.7}"
+      NR_ROMAN_URDU_MODEL: "${NR_ROMAN_URDU_MODEL:-grok-4.7}"
+      NR_VALIDATOR_MODEL: "${NR_VALIDATOR_MODEL:-grok-4.6}"
+      NR_LLM_API_KEY: "${NR_LLM_API_KEY:-${GROK_API_KEY:-${OPENAI_API_KEY:-}}}"
+      NR_FB_USER_ACCESS_TOKEN: "${NR_FB_USER_ACCESS_TOKEN:-${FB_USER_ACCESS_TOKEN:-}}"
+      NR_FB_PAGE_ACCESS_TOKEN: "${NR_FB_PAGE_ACCESS_TOKEN:-${FB_PAGE_ACCESS_TOKEN:-}}"
       NR_ADMIN_TOKEN: "${NR_ADMIN_TOKEN:-}"
     volumes:
       - ./data:/app/data

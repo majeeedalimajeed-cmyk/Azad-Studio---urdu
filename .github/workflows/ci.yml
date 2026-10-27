@@ -1,0 +1,47 @@
+name: CI — tests and dry-run card
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install RTL runtime dependency
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libraqm0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Verify exact logo and fonts
+        run: python -m nr_news.cli check-assets
+
+      - name: Run offline tests
+        run: python -m pytest -q tests
+
+      - name: Render verified dry-run fixture
+        run: |
+          python -m nr_news.cli init
+          python -m nr_news.cli fixture
+
+      - name: Upload rendered dry-run card
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-card
+          path: data/cards/*.png
+          if-no-files-found: error

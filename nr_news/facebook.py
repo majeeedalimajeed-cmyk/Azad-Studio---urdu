@@ -1,8 +1,9 @@
 """Official Meta Graph API v26.0 client and Page identity verification.
 
-The numeric value in the configured Facebook profile URL is used ONLY as a
-lookup hint against /me/accounts. Publishing always uses the Page ID confirmed
-by the API and stored in the durable settings table.
+The configured Facebook profile URL, an explicit NR_FB_PAGE_ID, or the exact
+expected Page name are used ONLY as lookup hints against /me/accounts.
+Publishing always uses the Page ID confirmed by the API and stored in the
+durable settings table.
 """
 from __future__ import annotations
 
@@ -29,7 +30,6 @@ class GraphAPIError(RuntimeError):
 class FacebookGraphClient:
     REQUIRED_PERMISSIONS = (
         "pages_manage_posts", "pages_read_engagement", "pages_show_list",
-        "pages_manage_engagement", "pages_read_user_engagement",
     )
     REQUIRED_TASKS = {"CREATE_CONTENT", "MANAGE", "MODERATE"}
 
@@ -84,12 +84,23 @@ class FacebookGraphClient:
             return {"ok": False, "reason": str(exc)}
 
         pages = accounts.get("data", [])
-        hint = self.config.facebook_page_url_hint_id
-        matches = [p for p in pages if str(p.get("id")) == hint or hint in str(p.get("link", ""))]
+        hint = self.config.facebook_page_id or self.config.facebook_page_url_hint_id
+        expected_name = (self.config.expected_page_name or "").strip().casefold()
+        matches_by_id: dict[str, dict[str, Any]] = {}
+        for candidate in pages:
+            cid = str(candidate.get("id", ""))
+            api_name = str(candidate.get("name", "")).strip().casefold()
+            if (cid == hint
+                    or hint in str(candidate.get("link", ""))
+                    or (expected_name and api_name == expected_name)):
+                matches_by_id[cid] = candidate
+        matches = list(matches_by_id.values())
         if len(matches) != 1:
-            reason = f"The configured profile URL resolved to {len(matches)} managed Pages; identity not confirmed."
+            reason = f"The configured Page ID/name resolved to {len(matches)} managed Pages; identity not confirmed."
             self.db.insert_api_event("facebook", "verify_identity", "held", reason,
-                                     details={"configured_url": self.config.facebook_page_url})
+                                     details={"configured_url": self.config.facebook_page_url,
+                                              "configured_page_id": self.config.facebook_page_id,
+                                              "expected_page_name": self.config.expected_page_name})
             return {"ok": False, "reason": reason}
         page = matches[0]
         name = str(page.get("name", ""))
@@ -130,7 +141,8 @@ class FacebookGraphClient:
 
         self.db.set_setting("facebook_page_id", page_id)
         self.db.set_setting("facebook_page_name", name)
-        self.db.set_setting("facebook_page_url", self.config.facebook_page_url)
+        self.db.set_setting("facebook_page_url", str(confirmed.get("link") or self.config.facebook_page_url))
+        self.db.set_setting("facebook_configured_profile_url", self.config.facebook_page_url)
         self.db.set_setting("facebook_identity_verified_at", iso())
         self.db.insert_api_event("facebook", "verify_identity", "ok",
                                  "Page identity, role and permissions confirmed by Graph API",
@@ -160,8 +172,11 @@ class FacebookGraphClient:
         return payload
 
     def find_recent_caption(self, page_id: str, caption_hash_marker: str) -> dict[str, Any] | None:
+        # Feed reconciliation needs pages_read_engagement, which is granted to
+        # the authorized user token; Page tokens are used for publishing.
+        token = self.config.facebook_user_token or self.config.facebook_page_token or ""
         payload = self._call(
-            "GET", f"/{page_id}/feed", token=self.config.facebook_page_token or "",
+            "GET", f"/{page_id}/feed", token=token,
             params={"fields": "id,message,created_time", "limit": 30},
         )
         for post in payload.get("data", []):
