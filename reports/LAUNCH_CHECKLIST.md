@@ -87,3 +87,14 @@ Because of blocker 2, the hourly workflow will not invent or publish unverified 
 - Verify LLM gateway: https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40556907254
 - Hourly newsroom scan (auto mode, blocked by expired token): https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40557387623
 - Page-token diagnostics (expired token): https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40559104282
+- Verify Pixabay two-photo demo (live key, success): https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40642038560
+- Verify Facebook (fresh operator token, success): https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40642842228
+- Hourly newsroom (live flags, 2026-10-28): https://github.com/majeeedalimajeed-cmyk/Azad-Studio---urdu/actions/runs/40643001821
+
+## 2026-10-28 posting restart — current blockers
+
+- A fresh operator user token was validated (Page `1383450338187017`, tasks MANAGE/CREATE_CONTENT; Instagram business account `17841415369413272` / @azadstudioofficial linked; `instagram_content_publish` granted). User + Page tokens were updated as GitHub secrets at 06:16Z and `verify-facebook` passed.
+- **The token is short-lived and expires 2026-10-28T08:00:00Z.** Replace it with a long-lived user token (then re-derive the Page token) or a Business Settings system-user token before expiry, or hourly runs fail again with OAuth 190/463.
+- `test-post.yml` correctly returned `already_published` for the 2026-10-27 fixture post, so no duplicate was created; the `facebook_test_post_passed` gate remains green.
+- Hourly run `40643001821` scanned Etemaad/Munsif/The Wire (48 items; Indian Express unavailable, robots 403) and held 20 review items: **the LLM gateway still blocks fresh stories** (Grok key invalid; OpenAI `credit_balance_exhausted`). No new public post can be generated until a valid funded LLM key is configured.
+- Instagram cross-posting is not yet implemented in the publisher; the linked IG account and publish permission are confirmed, so it can be built once the long-lived token and LLM gateway are in place (IG requires a publicly reachable image URL, planned via the Facebook-posted photo).
