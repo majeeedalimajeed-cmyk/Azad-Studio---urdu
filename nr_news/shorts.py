@@ -477,6 +477,160 @@ def bulletin_segments(
     return cleaned
 
 
+INTRO_SECONDS = 4.2
+_INTRO_FPS = 30
+
+
+def _fade(t: float, start: float, end: float) -> float:
+    if t <= start:
+        return 0.0
+    if t >= end:
+        return 1.0
+    return (t - start) / (end - start)
+
+
+def synthesize_intro_music(out_path: Path, seconds: float = INTRO_SECONDS,
+                           *, config=CONFIG) -> Path:
+    """Soft, sophisticated instrumental news sting (generated, no vocals).
+
+    A warm D-minor-add9 pad (D2/D3/F3/A3/E4 sines through a low-pass) with
+    one gentle high accent as the light sweep passes. Low volume, smooth
+    fade-in and fade-out so the anchor enters cleanly over silence.
+    """
+    dur = f"{seconds:.2f}"
+    inputs: list[str] = []
+    for freq in ("73.42", "146.83", "174.61", "220.00", "329.63"):
+        inputs += ["-f", "lavfi", "-i", f"sine=frequency={freq}:duration={dur}"]
+    inputs += ["-f", "lavfi", "-i", f"sine=frequency=880.00:duration={dur}"]
+    fc = (
+        "[0:a]volume=0.20[p0];[1:a]volume=0.16[p1];[2:a]volume=0.11[p2];"
+        "[3:a]volume=0.12[p3];[4:a]volume=0.05[p4];"
+        "[5:a]volume=0.035,adelay=1150|1150,"
+        "afade=t=out:st=1.15:d=0.9[bell];"
+        "[p0][p1][p2][p3][p4][bell]amix=inputs=6:duration=longest:normalize=0,"
+        "lowpass=f=1100,volume=0.55,"
+        f"afade=t=in:st=0:d=0.9,afade=t=out:st={seconds - 1.4:.2f}:d=1.4,"
+        f"atrim=0:{dur}[a]"
+    )
+    proc = _run_ffmpeg([ffmpeg_exe(), "-y", *inputs, "-filter_complex", fc,
+                        "-map", "[a]", "-c:a", "libmp3lame", "-q:a", "4",
+                        str(out_path)], config)
+    if proc.returncode != 0 or not out_path.exists():
+        # Fall back to silence rather than failing the whole bulletin.
+        proc = _run_ffmpeg([ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                            "anullsrc=r=44100:cl=stereo", "-t", dur,
+                            "-c:a", "libmp3lame", "-q:a", "4", str(out_path)], config)
+    if proc.returncode != 0 or not out_path.exists():
+        raise ShortUnavailable("Intro music generation failed")
+    return out_path
+
+
+def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
+    """Premium 3-5s channel intro: gold logo, golden light sweep, Urdu reveal.
+
+    Dark navy-black backdrop, the existing gold AZAD STUDIO monogram fades
+    and settles in, a subtle golden light sweep crosses it, then the Urdu
+    lines "آزاد اسٹوڈیو میں خوش آمدید" and "آج کی تازہ ترین خبریں" reveal
+    elegantly over soft news music that fades out for the anchor.
+    """
+    from PIL import Image, ImageDraw
+
+    from .renderer import CardRenderer, gradient, isolate_latin, load_logo, proportional_logo
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    renderer = CardRenderer(config)
+    logo = load_logo()
+    base = gradient((SLIDE_W, SLIDE_H), (6, 9, 18), (2, 3, 7))
+
+    frames_dir = out_dir / "intro_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    frame_count = int(INTRO_SECONDS * _INTRO_FPS)
+
+    def text_layer(text: str, size: int, fill: tuple[int, int, int],
+                   cy: int, alpha: float) -> Image.Image:
+        layer = Image.new("RGBA", (SLIDE_W, SLIDE_H), (0, 0, 0, 0))
+        if alpha <= 0:
+            return layer
+        ld = ImageDraw.Draw(layer)
+        fnt = renderer._font(True, size, "Bold")
+        ld.text((SLIDE_W // 2, cy), isolate_latin(text), font=fnt,
+                fill=fill + (255,), anchor="mm", direction="rtl", language="ur")
+        if alpha < 1.0:
+            layer.putalpha(layer.split()[3].point(lambda a: int(a * alpha)))
+        return layer
+
+    for n in range(frame_count):
+        t = n / _INTRO_FPS
+        im = base.copy().convert("RGBA")
+        d = ImageDraw.Draw(im, "RGBA")
+
+        # Top brand line (static, refined broadcast furniture).
+        d.rectangle((0, 0, SLIDE_W, 4), fill=(226, 184, 74, 255))
+
+        # Logo: gentle fade + settle (scale 0.94 -> 1.00), centre screen.
+        appear = _fade(t, 0.15, 1.15)
+        if appear > 0:
+            size = int(320 * (0.94 + 0.06 * appear))
+            mark = proportional_logo(logo, size)
+            if mark.mode != "RGBA":
+                mark = mark.convert("RGBA")
+            if appear < 1.0:
+                mark.putalpha(mark.split()[3].point(lambda a: int(a * appear)))
+            im.paste(mark, ((SLIDE_W - mark.width) // 2, 560 - mark.height // 2), mark)
+            d = ImageDraw.Draw(im, "RGBA")
+
+        # Subtle golden light sweep across the frame (1.0s -> 2.1s): a
+        # narrow, faint diagonal sheen — never a solid band. Drawn on its
+        # own layer and alpha-composited so it stays genuinely translucent.
+        sweep = _fade(t, 1.0, 2.1)
+        if 0.0 < sweep < 1.0:
+            x = -260 + sweep * (SLIDE_W + 520)
+            glow = int(34 * (1.0 - abs(sweep - 0.5) * 2) + 4)
+            sheen = Image.new("RGBA", (SLIDE_W, SLIDE_H), (0, 0, 0, 0))
+            sd = ImageDraw.Draw(sheen)
+            sd.polygon([(x, -80), (x + 170, -80), (x + 40, SLIDE_H + 80),
+                        (x - 130, SLIDE_H + 80)], fill=(255, 214, 120, 255))
+            sheen.putalpha(sheen.split()[3].point(lambda a: int(a * glow / 255)))
+            im = Image.alpha_composite(im, sheen)
+            d = ImageDraw.Draw(im, "RGBA")
+
+        # Gold divider grows under the logo.
+        grow = _fade(t, 1.9, 2.6)
+        if grow > 0:
+            half = int(210 * grow)
+            d.rectangle((SLIDE_W // 2 - half, 1006, SLIDE_W // 2 + half, 1012),
+                        fill=(226, 184, 74, 255))
+
+        # Urdu reveal: welcome first, then today's-news line.
+        im = Image.alpha_composite(im, text_layer(
+            WELCOME_URDU, 66, (255, 231, 151), 1130, _fade(t, 1.35, 2.15)))
+        im = Image.alpha_composite(im, text_layer(
+            TODAYS_NEWS_URDU, 48, (248, 247, 242), 1265, _fade(t, 2.35, 3.15)))
+
+        # Cinematic close: ease to black for a seamless cut to the anchor.
+        if t > INTRO_SECONDS - 0.35:
+            black = Image.new("RGBA", (SLIDE_W, SLIDE_H), (0, 0, 0, 255))
+            black.putalpha(int(255 * (t - (INTRO_SECONDS - 0.35)) / 0.35))
+            im = Image.alpha_composite(im, black)
+
+        im.convert("RGB").save(frames_dir / f"frame_{n:03d}.png")
+
+    music = synthesize_intro_music(out_dir / "intro_music.mp3", config=config)
+    intro_path = out_dir / "intro.mp4"
+    proc = _run_ffmpeg([
+        ffmpeg_exe(), "-y", "-framerate", str(_INTRO_FPS),
+        "-i", str(frames_dir / "frame_%03d.png"), "-i", str(music),
+        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+        "-ar", "44100", "-ac", "2", "-t", f"{INTRO_SECONDS:.2f}",
+        str(intro_path)], config)
+    if proc.returncode != 0 or not intro_path.exists():
+        raise ShortUnavailable(
+            "Intro clip failed: " + redact(proc.stderr[-500:], config.secret_values))
+    return intro_path
+
+
 def build_bulletin(stories: list[EditorialContent], out_dir: Path,
                    *, config=CONFIG) -> dict[str, Any]:
     """Build one premium bulletin video: ranked stories, one at a time.
@@ -519,11 +673,19 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
     label_path = seg_dir / "ticker_label.png"
     label.save(label_path)
 
-    clip_paths: list[Path] = []
+    # Premium channel intro (animated logo + soft music) opens the bulletin;
+    # the anchor's first headline follows as the music fades out.
+    intro_clip = build_intro_clip(seg_dir, config=config)
+    clip_paths: list[Path] = [intro_clip]
     audio_parts: list[Path] = []
-    timed: list[dict[str, Any]] = []
-    elapsed = 0.0
+    timed: list[dict[str, Any]] = [
+        {"kind": "intro", "text": f"{WELCOME_URDU}، {BULLETIN_INTRO_URDU}",
+         "seconds": INTRO_SECONDS, "starts_at": 0.0},
+    ]
+    elapsed = INTRO_SECONDS
     for i, (story, seg) in enumerate(pairs):
+        if seg["kind"] == "intro":
+            continue  # covered by the animated intro clip above
         audio = synthesize_tts(seg["text"] + "۔", config.tts_voice, config.tts_rate,
                                seg_dir / f"seg_{i:02d}.mp3",
                                pitch=getattr(config, "tts_pitch", "-2Hz"),
