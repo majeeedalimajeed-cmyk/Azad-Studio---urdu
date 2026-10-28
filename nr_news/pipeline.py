@@ -148,6 +148,38 @@ class NewsPipeline:
             )
             if not card_row:
                 continue
+            if not Path(card_row["file_path"]).exists():
+                # Card PNGs are not persisted between CI runs; re-render from
+                # the stored editorial (fresh licensed photos when available)
+                # so an approved story is never stranded by a missing file.
+                content = EditorialContent(
+                    urdu_headline=editorial["urdu_headline"],
+                    urdu_bullets=_json(editorial["urdu_bullets_json"], []),
+                    roman_headline=editorial["roman_headline"],
+                    roman_bullets=_json(editorial["roman_bullets_json"], []),
+                    verification_notes=_json(editorial["verification_notes_json"], []),
+                    source_urls=_json(editorial["source_urls_json"], []),
+                    publication_time=editorial.get("publication_time") or iso(),
+                    media=None,
+                )
+                candidate = self.db.get_candidate(editorial["candidate_id"]) or {}
+                raw = _json(candidate.get("raw_json"), {}) if candidate else {}
+                media_list = (
+                    self.media.select_many(
+                        candidate, raw.get("media"),
+                        query_context={"pixabay_query": raw.get("pixabay_query")},
+                    ) if candidate else []
+                )
+                rendered = self.cards.render(editorial["id"], content,
+                                             media=media_list or None)
+                if not rendered:
+                    continue
+                card_row = self.db.one(
+                    "SELECT * FROM cards WHERE file_path=? ORDER BY created_at DESC LIMIT 1",
+                    (rendered[0].path,),
+                )
+                if not card_row:
+                    continue
             try:
                 results.append(self.publisher.publish(
                     editorial["id"], card_row, dry_run=self.config.dry_run))
