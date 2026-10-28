@@ -92,15 +92,19 @@ def ffmpeg_exe() -> str:
         raise ShortUnavailable("ffmpeg is not available") from exc
 
 
-async def _synthesize(text: str, voice: str, rate: str, out_path: Path) -> None:
+async def _synthesize(text: str, voice: str, rate: str, out_path: Path,
+                      *, pitch: str = "-2Hz", volume: str = "+0%") -> None:
     import edge_tts
-    communicate = edge_tts.Communicate(text, voice=voice, rate=rate)
+    communicate = edge_tts.Communicate(text, voice=voice, rate=rate,
+                                       pitch=pitch, volume=volume)
     await communicate.save(str(out_path))
 
 
-def synthesize_tts(text: str, voice: str, rate: str, out_path: Path) -> Path:
+def synthesize_tts(text: str, voice: str, rate: str, out_path: Path,
+                   *, pitch: str = "-2Hz", volume: str = "+0%") -> Path:
     try:
-        asyncio.run(_synthesize(text, voice, rate, out_path))
+        asyncio.run(_synthesize(text, voice, rate, out_path,
+                                pitch=pitch, volume=volume))
     except Exception as exc:
         raise ShortUnavailable(f"Urdu TTS failed: {type(exc).__name__}") from exc
     if not out_path.exists() or out_path.stat().st_size < 5_000:
@@ -123,9 +127,10 @@ def _run_ffmpeg(cmd: list[str], config=CONFIG) -> subprocess.CompletedProcess:
 
 
 SLIDE_W, SLIDE_H = 1080, 1920
-# Tight broadcast pacing: the slide changes land on the anchor's segment
-# boundaries (per-segment TTS timestamps), with only a breath between.
-SEGMENT_GAP_SECONDS = 0.15
+# Broadcast pacing: slide changes land on the anchor's segment boundaries
+# (per-segment TTS timestamps) with a natural newsreader pause between
+# sentences and headlines — clarity over speed.
+SEGMENT_GAP_SECONDS = 0.35
 _FPS = 30
 
 
@@ -345,7 +350,9 @@ def build_short(content: EditorialContent, out_dir: Path,
     elapsed = 0.0
     for i, seg in enumerate(segments):
         audio = synthesize_tts(seg["text"] + "۔", config.tts_voice, config.tts_rate,
-                               seg_dir / f"seg_{i:02d}.mp3")
+                               seg_dir / f"seg_{i:02d}.mp3",
+                               pitch=getattr(config, "tts_pitch", "-2Hz"),
+                               volume=getattr(config, "tts_volume", "+0%"))
         seg_seconds = audio_duration(audio)
         clip_seconds = seg_seconds + SEGMENT_GAP_SECONDS
         slide = render_slide(content, seg, seg_dir / f"slide_{i:02d}.png", config=config)
@@ -431,6 +438,183 @@ def build_short(content: EditorialContent, out_dir: Path,
         "duration_seconds": round(elapsed, 2),
         "script": script,
         "voice": config.tts_voice,
+        "segments": timed,
+    }
+
+
+BULLETIN_INTRO_URDU = "آج کی اہم ترین سیاسی خبریں"
+
+
+def bulletin_segments(
+    stories: list[EditorialContent],
+) -> list[tuple[EditorialContent, dict[str, Any]]]:
+    """Ordered (story, segment) pairs for a multi-story bulletin.
+
+    One brand sting, then each story in rank order: its headline slide
+    followed by its bullets (one story at a time, synced to the anchor).
+    A story's final bullet may carry its spoken source credit.
+    """
+    if not stories:
+        return []
+    pairs: list[tuple[EditorialContent, dict[str, Any]]] = [
+        (stories[0], {"kind": "intro",
+                      "text": f"{WELCOME_URDU}، {BULLETIN_INTRO_URDU}"}),
+    ]
+    for story_no, story in enumerate(stories, 1):
+        pairs.append((story, {"kind": "headline", "text": story.urdu_headline,
+                              "story_index": story_no,
+                              "story_total": len(stories)}))
+        bullets = list(story.urdu_bullets)[:5]
+        for idx, bullet in enumerate(bullets, 1):
+            pairs.append((story, {"kind": "bullet", "index": idx,
+                                  "total": len(bullets), "text": bullet,
+                                  "story_index": story_no}))
+    cleaned: list[tuple[EditorialContent, dict[str, Any]]] = []
+    for story, seg in pairs:
+        text = clean_text(seg["text"], 400).rstrip("۔. ").strip()
+        if text:
+            cleaned.append((story, {**seg, "text": text}))
+    return cleaned
+
+
+def build_bulletin(stories: list[EditorialContent], out_dir: Path,
+                   *, config=CONFIG) -> dict[str, Any]:
+    """Build one premium bulletin video: ranked stories, one at a time.
+
+    Reuses the broadcast slide engine and the upgraded newsreader voice
+    (slower rate, broadcast pitch/volume, natural inter-segment pauses).
+    Each story keeps its own headline context on screen while its bullets
+    play; a scrolling AZAD STUDIO ticker runs along the bottom.
+    """
+    if not stories:
+        raise ShortUnavailable("Bulletin needs at least one story")
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pairs = bulletin_segments(stories)
+    script = "۔\n".join(seg["text"] for _, seg in pairs) + "۔"
+    (out_dir / "voiceover_urdu.txt").write_text(script, encoding="utf-8")
+
+    seg_dir = out_dir / "segments"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    from .renderer import font as _pil_font, isolate_latin
+
+    ticker_text = "AZAD STUDIO POLITICAL BULLETIN"
+    strip_font = _pil_font(config.latin_font_path, 30, "Medium")
+    probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+    strip_w = int(probe.textlength(ticker_text, font=strip_font)) + 160
+    strip = Image.new("RGBA", (strip_w, 64), (0, 0, 0, 0))
+    ImageDraw.Draw(strip).text((80, 32), ticker_text, font=strip_font,
+                               fill=(235, 238, 245, 255), anchor="lm")
+    strip_path = seg_dir / "ticker_strip.png"
+    strip.save(strip_path)
+    label = Image.new("RGBA", (238, 126), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(label)
+    ld.rectangle((0, 0, 238, 126), fill=(190, 24, 35, 255))
+    urdu_f = ImageFont.truetype(str(config.urdu_font_path), 30)
+    ld.text((119, 63), isolate_latin("تازہ ترین"), font=urdu_f,
+            fill=(255, 255, 255, 255), anchor="mm", direction="rtl", language="ur")
+    label_path = seg_dir / "ticker_label.png"
+    label.save(label_path)
+
+    clip_paths: list[Path] = []
+    audio_parts: list[Path] = []
+    timed: list[dict[str, Any]] = []
+    elapsed = 0.0
+    for i, (story, seg) in enumerate(pairs):
+        audio = synthesize_tts(seg["text"] + "۔", config.tts_voice, config.tts_rate,
+                               seg_dir / f"seg_{i:02d}.mp3",
+                               pitch=getattr(config, "tts_pitch", "-2Hz"),
+                               volume=getattr(config, "tts_volume", "+0%"))
+        seg_seconds = audio_duration(audio)
+        clip_seconds = seg_seconds + SEGMENT_GAP_SECONDS
+        slide = render_slide(story, seg, seg_dir / f"slide_{i:02d}.png", config=config)
+        clip = seg_dir / f"clip_{i:02d}.mp4"
+        fade_out = max(0.0, clip_seconds - 0.15)
+        fc_full = (
+            f"[0:v][1:v]overlay=x='1080-mod((t+{elapsed:.2f})*130\\,{1080 + strip_w})'"
+            ":y=1721[t1];[t1][2:v]overlay=0:1690[t2];"
+            f"[t2]fade=t=in:st=0:d=0.15,fade=t=out:st={fade_out:.2f}:d=0.15,"
+            "format=yuv420p[v]"
+        )
+        vf_plain = (
+            "scale=1080:1920,fade=t=in:st=0:d=0.15,"
+            f"fade=t=out:st={fade_out:.2f}:d=0.15,format=yuv420p"
+        )
+        attempts = [
+            [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide),
+             "-loop", "1", "-i", str(strip_path), "-loop", "1", "-i", str(label_path),
+             "-i", str(audio), "-filter_complex", fc_full,
+             "-af", f"apad,atrim=0:{clip_seconds:.2f}",
+             "-map", "[v]", "-map", "3:a"],
+            [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide), "-i", str(audio),
+             "-vf", vf_plain, "-af", f"apad,atrim=0:{clip_seconds:.2f}",
+             "-map", "0:v", "-map", "1:a"],
+        ]
+        built_clip = False
+        proc = None
+        for head in attempts:
+            cmd = head + [
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+                "-t", f"{clip_seconds:.2f}", str(clip),
+            ]
+            proc = _run_ffmpeg(cmd, config)
+            if proc.returncode == 0 and clip.exists():
+                built_clip = True
+                break
+        if not built_clip:
+            raise ShortUnavailable(
+                "ffmpeg bulletin segment failed: "
+                + redact((proc.stderr if proc else "")[-500:], config.secret_values))
+        clip_paths.append(clip)
+        audio_parts.append(audio)
+        timed.append({**seg, "seconds": round(seg_seconds, 2),
+                      "starts_at": round(elapsed, 2)})
+        elapsed += clip_seconds
+
+    list_file = seg_dir / "clips.txt"
+    list_file.write_text("".join(f"file '{p.resolve()}'\n" for p in clip_paths),
+                         encoding="utf-8")
+    video_path = out_dir / "bulletin.mp4"
+    proc = _run_ffmpeg([
+        ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+        "-c", "copy", "-movflags", "+faststart", str(video_path)], config)
+    if proc.returncode != 0 or not video_path.exists():
+        raise ShortUnavailable(
+            "ffmpeg bulletin concat failed: " + redact(proc.stderr[-500:], config.secret_values))
+
+    combined = out_dir / "voiceover_urdu.mp3"
+    try:
+        silence = seg_dir / "silence.mp3"
+        _run_ffmpeg([ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                     "anullsrc=r=44100:cl=stereo", "-t", str(SEGMENT_GAP_SECONDS),
+                     "-c:a", "libmp3lame", "-q:a", "4", str(silence)], config)
+        parts: list[Path] = []
+        for j, audio in enumerate(audio_parts):
+            parts.append(audio)
+            if j < len(audio_parts) - 1:
+                parts.append(silence)
+        alist = seg_dir / "audio.txt"
+        alist.write_text("".join(f"file '{p.resolve()}'\n" for p in parts),
+                         encoding="utf-8")
+        _run_ffmpeg([ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0", "-i",
+                     str(alist), "-c:a", "libmp3lame", "-q:a", "3", str(combined)],
+                    config)
+    except Exception:
+        combined = audio_parts[0] if audio_parts else combined
+
+    return {
+        "video_path": str(video_path),
+        "audio_path": str(combined),
+        "duration_seconds": round(elapsed, 2),
+        "script": script,
+        "voice": config.tts_voice,
+        "rate": config.tts_rate,
+        "pitch": getattr(config, "tts_pitch", "-2Hz"),
+        "story_count": len(stories),
         "segments": timed,
     }
 

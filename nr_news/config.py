@@ -175,7 +175,12 @@ class Config:
         default_factory=lambda: os.getenv("NR_YOUTUBE_PRIVACY", "public"))
     tts_voice: str = field(
         default_factory=lambda: os.getenv("NR_TTS_VOICE", "ur-PK-AsadNeural"))
-    tts_rate: str = field(default_factory=lambda: os.getenv("NR_TTS_RATE", "-5%"))
+    # Broadcast delivery: steady, slightly slower pace for clear Urdu
+    # articulation; a touch lower pitch for a warm, authoritative tone;
+    # neutral volume (balanced loudness, no distortion).
+    tts_rate: str = field(default_factory=lambda: os.getenv("NR_TTS_RATE", "-10%"))
+    tts_pitch: str = field(default_factory=lambda: os.getenv("NR_TTS_PITCH", "-2Hz"))
+    tts_volume: str = field(default_factory=lambda: os.getenv("NR_TTS_VOLUME", "+0%"))
     # Shorts schedule (Asia/Kolkata): best 3 at 09:00, best 3 at 19:00, one
     # slot of the daily 6 reserved for an immediate breaking Short.
     shorts_morning_hour: int = int(os.getenv("NR_SHORTS_MORNING_HOUR", "9"))

@@ -710,7 +710,7 @@ def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
         verification_notes=[], source_urls=[], publication_time=iso(), media=None,
     )
 
-    def fake_tts(text, voice, rate, out_path):
+    def fake_tts(text, voice, rate, out_path, **kwargs):
         import wave
         with wave.open(str(out_path), "wb") as wav:
             wav.setnchannels(1)
@@ -724,12 +724,12 @@ def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
     built = shorts.build_short(content, tmp_path / "out", config=cfg)
     video = Path(built["video_path"])
     assert video.exists() and video.stat().st_size > 10_000
-    # one merged intro sting + headline + 3 live bullets, each 2.0s + 0.15s
-    # gap; slide changes land on the per-segment TTS boundaries
+    # one merged intro sting + headline + 3 live bullets, each 2.0s + 0.35s
+    # broadcast pause; slide changes land on the per-segment TTS boundaries
     assert [s["kind"] for s in built["segments"]] == [
         "intro", "headline", "bullet", "bullet", "bullet"]
     assert built["segments"][-1]["starts_at"] > built["segments"][0]["starts_at"]
-    assert built["duration_seconds"] == pytest.approx(5 * 2.15)
+    assert built["duration_seconds"] == pytest.approx(5 * 2.35)
     seg_dir = Path(built["video_path"]).parent / "segments"
     slides = sorted(seg_dir.glob("slide_*.png"))
     assert len(slides) == 5
