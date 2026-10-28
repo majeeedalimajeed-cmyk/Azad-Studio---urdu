@@ -730,7 +730,7 @@ def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
 
 
 def test_urdu_script_starts_with_welcome():
-    from nr_news.shorts import WELCOME_URDU, urdu_script
+    from nr_news.shorts import TODAYS_NEWS_URDU, WELCOME_URDU, urdu_script
 
     content = EditorialContent(
         urdu_headline="سرخی", urdu_bullets=["ایک", "دو", "تین", "چار", "پانچ"],
@@ -739,6 +739,7 @@ def test_urdu_script_starts_with_welcome():
     )
     normal = urdu_script(content)
     assert normal.startswith(WELCOME_URDU)
+    assert TODAYS_NEWS_URDU in normal.split("۔")[1]  # "...today's latest news" right after welcome
     assert "Welcome" not in normal and "Headline" not in normal
     assert "چار" not in normal and "پانچ" not in normal  # scheduled: first 3 bullets
     full = urdu_script(content, full_details=True)

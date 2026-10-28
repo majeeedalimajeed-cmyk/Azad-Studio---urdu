@@ -43,3 +43,8 @@ Live publishing remains disabled until operator approval, all safety flags, and 
 - `shorts-cycle` scheduler (IST): 1) reserved breaking Short first — urgent headline signals (بریکنگ / فوری خبر / breaking / just in) within 6h, narrated with FULL details (all bullets); 2) 09:00 batch of best 3; 3) 19:00 batch fills the day to 6 (3+2 when breaking fired, else 3+3; late breaking still posts as an extra). Best-news score = editorial priority (regional politics first) + recency + photo + detail. Duplicate-safe via per-day ledger + `youtube_video_for_{id}` settings. Per-story `prepare()` no longer uploads; it only writes scripts/storyboards.
 - Tests: 39 passed (new: `test_urdu_script_starts_with_welcome`, `test_detect_breaking_markers`, `test_shorts_cycle_batches_and_breaking`).
 - Verified locally: `shorts-cycle` reports disabled (no OAuth yet); `shorts-demo` narration begins with the welcome (30.6s).
+
+## Welcome intro correction (operator feedback)
+- Every Short now opens: "آزاد اسٹوڈیو میں خوش آمدید" + "آج کی تازہ ترین خبریں" (Welcome to AZAD STUDIO, today's latest news), then headline/bullets. Breaking Shorts insert "بریکنگ نیوز" after the intro.
+- Tests: 39 passed (welcome test now also asserts the today's-latest-news line).
+- Proof upload with corrected intro: https://www.youtube.com/shorts/dMOtC0t-hdM (supersedes test RinpRzD4xeU, which had no intro; owner may delete it).

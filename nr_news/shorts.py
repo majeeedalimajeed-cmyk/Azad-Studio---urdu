@@ -26,6 +26,7 @@ class ShortUnavailable(RuntimeError):
 
 
 WELCOME_URDU = "آزاد اسٹوڈیو میں خوش آمدید"
+TODAYS_NEWS_URDU = "آج کی تازہ ترین خبریں"
 BREAKING_URDU = "بریکنگ نیوز"
 
 # Urgency signals for the reserved breaking-news Short (headline scan).
@@ -50,7 +51,7 @@ def urdu_script(content: EditorialContent, *, full_details: bool = False) -> str
     bullets = list(content.urdu_bullets)
     if not full_details:
         bullets = bullets[:3]
-    parts = [WELCOME_URDU]
+    parts = [WELCOME_URDU, TODAYS_NEWS_URDU]
     if full_details:
         parts.append(BREAKING_URDU)
     parts += [content.urdu_headline] + bullets
