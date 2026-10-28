@@ -64,3 +64,8 @@ Live publishing remains disabled until operator approval, all safety flags, and 
 - Premium newsroom frame: exact monogram brand bar, red LATEST pill, dark sheen background, smooth 0.22s fades, and a bottom ticker bar (red "تازہ ترین" label) with the Roman headline scrolling underneath it (PIL strip overlay, no drawtext dependency).
 - Breaking Shorts insert a red "بریکنگ نیوز" slide after the intro and read all bullets.
 - Tests: 40 passed (segment order/timing + 1080x1920 slide size asserted). Proof uploads: test3 broadcast demo (see YouTube), frames verified at 16s/24s switching bullets 1 -> 2.
+
+## Premium TV broadcast upgrade (v2 slides)
+- Cleaner flat newsroom frame (decorative sheen removed), story visual band under the brand bar using the relevant rights-cleared photo (credits stay in hidden audit only); faint monogram watermark fallback when no photo exists yet/anymore.
+- Larger, mobile-readable type: headline 58px, active bullet 48px (auto-fit floor 32px), one point at a time in the highlighted card; narration and segment timing unchanged, so sync is identical.
+- Tests: 41 passed incl. `test_broadcast_slide_uses_story_photo` (photo pixels verified in band; missing-file fallback safe).

@@ -860,6 +860,31 @@ def test_shorts_cycle_batches_and_breaking(tmp_path, monkeypatch):
     assert out["uploaded"] == [] and len(calls) == 6
 
 
+def test_broadcast_slide_uses_story_photo(tmp_path):
+    from nr_news.shorts import render_slide
+
+    cfg = temp_config(tmp_path)
+    photo = tmp_path / "story.jpg"
+    Image.new("RGB", (1200, 800), (170, 30, 30)).save(photo)
+    content = EditorialContent(
+        urdu_headline="اردو سرخی", urdu_bullets=["ایک"],
+        roman_headline="Roman headline", roman_bullets=["one"],
+        verification_notes=[], source_urls=[], publication_time=iso(),
+        media=[{"local_path": str(photo)}],
+    )
+    out = render_slide(content, {"kind": "bullet", "index": 1, "total": 1,
+                                 "text": "ایک"}, tmp_path / "slide.png", config=cfg)
+    with Image.open(out) as im:
+        assert im.size == (1080, 1920)
+        r, g, b = im.convert("RGB").getpixel((540, 320))  # photo band centre
+        assert r > 120 and g < 80 and b < 80
+    # Missing photo file must not break the slide (branded fallback).
+    content.media = [{"local_path": str(tmp_path / "gone.jpg")}]
+    out2 = render_slide(content, {"kind": "headline", "text": "اردو سرخی"},
+                        tmp_path / "slide2.png", config=cfg)
+    assert out2.exists()
+
+
 def test_single_source_substantial_report_verifies_but_claims_hold(tmp_path):
     cfg = temp_config(tmp_path)
     db = Database(cfg.db_path)

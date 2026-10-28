@@ -142,14 +142,6 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
     logo = load_logo()
     im = gradient((SLIDE_W, SLIDE_H), (8, 13, 28), (3, 4, 8))
     d = ImageDraw.Draw(im, "RGBA")
-    # Subtle diagonal sheen and a soft gold glow, keeping the frame calm.
-    for i in range(-4, 12):
-        x = i * 170
-        d.polygon([(x, SLIDE_H), (x + 430, 0), (x + 540, 0), (x + 110, SLIDE_H)],
-                  fill=(255, 255, 255, 5))
-    for r in range(460, 60, -50):
-        d.ellipse((SLIDE_W - 430 - r, -330 - r, SLIDE_W - 430 + r, -330 + r),
-                  fill=(226, 184, 74, 5))
 
     def rtl(text, size, *, weight="Bold", fill=(248, 247, 242), xy=(0, 0),
             anchor="ra", max_width=920, max_lines=4, line_factor=1.65):
@@ -179,6 +171,46 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
     d.text((SLIDE_W - 168, 75), "LATEST", font=latest_f, fill=(255, 255, 255),
            anchor="mm")
 
+    def photo_band() -> None:
+        """Relevant rights-cleared story visual; calm branded fallback.
+
+        Only the photo itself is shown (credits stay in the hidden audit,
+        per operator rule). Missing files fall back without breaking.
+        """
+        from PIL import Image, ImageOps
+
+        from .renderer import normalize_media
+
+        used = False
+        for item in normalize_media(content.media, 2):
+            lp = item.get("local_path")
+            if lp and Path(lp).exists():
+                try:
+                    with Image.open(lp) as src:
+                        fitted = ImageOps.fit(src.convert("RGB"), (SLIDE_W, 446))
+                    im.paste(fitted, (0, 154))
+                    used = True
+                    break
+                except Exception:
+                    continue
+        if not used:
+            d.rectangle((0, 154, SLIDE_W, 600), fill=(10, 15, 28))
+            try:
+                wm = proportional_logo(logo, 320)
+                if wm.mode != "RGBA":
+                    wm = wm.convert("RGBA")
+                wm.putalpha(wm.split()[3].point(lambda a: int(a * 0.15)))
+                im.paste(wm, (SLIDE_W - wm.width - 30, 210), wm)
+            except Exception:
+                pass
+        # Fade the band's lower edge into the page for a clean join.
+        fade = Image.new("L", (1, 110))
+        for yy in range(110):
+            fade.putpixel((0, yy), int(255 * yy / 109))
+        im.paste(Image.new("RGB", (SLIDE_W, 110), (4, 6, 12)), (0, 490),
+                 fade.resize((SLIDE_W, 110)))
+        d.rectangle((0, 597, SLIDE_W, 600), fill=(226, 184, 74))
+
     # --- Segment body ---------------------------------------------------
     kind = segment["kind"]
     if kind == "welcome":
@@ -195,43 +227,43 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
         d.text((SLIDE_W // 2, 1000), "AZAD STUDIO", font=sub_f,
                fill=(226, 184, 74), anchor="mm")
     elif kind == "breaking":
-        d.rounded_rectangle((80, 730, SLIDE_W - 80, 950), radius=36,
+        photo_band()
+        d.rounded_rectangle((80, 680, SLIDE_W - 80, 900), radius=36,
                             fill=(190, 24, 35))
         rtl(segment["text"], 78, fill=(255, 255, 255),
-            xy=(SLIDE_W // 2, 840), anchor="mm", max_lines=1)
-        rtl(content.urdu_headline, 36, fill=(226, 214, 180),
-            xy=(SLIDE_W - 80, 1030), anchor="ra", max_width=920, max_lines=3)
+            xy=(SLIDE_W // 2, 790), anchor="mm", max_lines=1)
+        rtl(content.urdu_headline, 38, fill=(226, 214, 180),
+            xy=(SLIDE_W - 80, 990), anchor="ra", max_width=920, max_lines=3)
     elif kind == "headline":
-        # Today's-news kicker, then the story headline large.
-        d.rectangle((SLIDE_W - 62, 196, SLIDE_W - 50, 232), fill=(190, 24, 35))
+        photo_band()
+        # Today's-news kicker, then the story headline large and readable.
+        d.rectangle((SLIDE_W - 62, 646, SLIDE_W - 50, 682), fill=(190, 24, 35))
         rtl(TODAYS_NEWS_URDU, 30, fill=(226, 184, 74),
-            xy=(SLIDE_W - 84, 200), anchor="ra", max_lines=1)
-        rtl(segment["text"], 54, xy=(SLIDE_W - 80, 470), max_lines=5)
-    else:  # bullet: persistent headline + highlighted active-bullet card
-        d.rectangle((SLIDE_W - 62, 186, SLIDE_W - 50, 218), fill=(190, 24, 35))
-        rtl(TODAYS_NEWS_URDU, 26, fill=(226, 184, 74),
-            xy=(SLIDE_W - 84, 188), anchor="ra", max_lines=1)
-        rtl(content.urdu_headline, 32, fill=(205, 212, 228),
-            xy=(SLIDE_W - 80, 250), max_lines=3)
-        d.rounded_rectangle((56, 500, SLIDE_W - 56, 1380), radius=30,
+            xy=(SLIDE_W - 84, 650), anchor="ra", max_lines=1)
+        rtl(segment["text"], 58, xy=(SLIDE_W - 80, 790), max_lines=4)
+    else:  # bullet: photo + persistent headline + one highlighted bullet
+        photo_band()
+        rtl(content.urdu_headline, 36, fill=(228, 232, 242),
+            xy=(SLIDE_W - 80, 648), max_lines=3)
+        d.rounded_rectangle((56, 900, SLIDE_W - 56, 1500), radius=30,
                             fill=(13, 18, 32), outline=(226, 184, 74), width=3)
-        d.rectangle((SLIDE_W - 84, 540, SLIDE_W - 70, 1340), fill=(226, 184, 74))
-        badge_cx, badge_cy = SLIDE_W - 150, 592
+        d.rectangle((SLIDE_W - 84, 940, SLIDE_W - 70, 1460), fill=(226, 184, 74))
+        badge_cx, badge_cy = SLIDE_W - 150, 992
         d.ellipse((badge_cx - 36, badge_cy - 36, badge_cx + 36, badge_cy + 36),
                   fill=(226, 184, 74))
         num_f = renderer._font(False, 38, "Bold")
         d.text((badge_cx, badge_cy + 2), str(segment["index"]), font=num_f,
                fill=(20, 14, 2), anchor="mm")
-        # Fit, then vertically centre the active bullet inside the card.
-        size = 44
+        # Fit at a large readable size, then centre inside the card.
+        size = 48
         while True:
             fnt_b = renderer._font(True, size, "Bold")
             lines_b = renderer.wrap(d, segment["text"], fnt_b, SLIDE_W - 280, True)
-            if len(lines_b) <= 7 or size <= 30:
+            if len(lines_b) <= 6 or size <= 32:
                 break
             size -= 2
         lh_b = size * 1.65
-        y_text = 575 + max(0.0, (720 - len(lines_b) * lh_b) / 2)
+        y_text = 960 + max(0.0, (470 - len(lines_b) * lh_b) / 2)
         for i, line in enumerate(lines_b):
             d.text((SLIDE_W - 130, y_text + i * lh_b), isolate_latin(line),
                    font=fnt_b, fill=(248, 247, 242), anchor="ra",
@@ -242,7 +274,7 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
         x0 = (SLIDE_W - dots_w) // 2
         for i in range(1, total + 1):
             cx = x0 + (i - 1) * 46 + 11
-            d.ellipse((cx - 11, 1459, cx + 11, 1481),
+            d.ellipse((cx - 11, 1579, cx + 11, 1601),
                       fill=(226, 184, 74) if i <= idx else (74, 82, 104))
 
     # --- Ticker bar (red label + scrolling strip are overlaid at build) --
