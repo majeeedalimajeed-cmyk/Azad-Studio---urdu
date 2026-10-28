@@ -260,6 +260,13 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
         rtl(TODAYS_NEWS_URDU, 30, fill=(226, 184, 74),
             xy=(SLIDE_W - 84, 770), anchor="ra", max_lines=1)
         rtl(segment["text"], 66, xy=(SLIDE_W - 80, 900), max_lines=4)
+    elif kind == "credits":
+        # Closing source credit, said once: calm navy slide, gold rule,
+        # the credit line centred. No photo band, no clutter.
+        d.rectangle((SLIDE_W // 2 - 210, 800, SLIDE_W // 2 + 210, 806),
+                    fill=(226, 184, 74))
+        rtl(segment["text"], 52, fill=(255, 231, 151),
+            xy=(SLIDE_W // 2, 960), anchor="mm", max_width=920, max_lines=4)
     else:  # bullet: bigger photo, headline stays, ONE large live bullet
         photo_band()
         rtl(content.urdu_headline, 40, fill=(228, 232, 242),
@@ -629,7 +636,7 @@ def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
 
 
 def build_bulletin(stories: list[EditorialContent], out_dir: Path,
-                   *, config=CONFIG) -> dict[str, Any]:
+                   *, config=CONFIG, closing_credit: str = "") -> dict[str, Any]:
     """Build one premium bulletin video: ranked stories, one at a time.
 
     Reuses the broadcast slide engine and the upgraded newsreader voice
@@ -642,6 +649,10 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     pairs = bulletin_segments(stories)
+    if closing_credit:
+        credit = clean_text(closing_credit, 400).rstrip("۔. ").strip()
+        if credit:
+            pairs.append((stories[0], {"kind": "credits", "text": credit}))
     script = "۔\n".join(seg["text"] for _, seg in pairs) + "۔"
     (out_dir / "voiceover_urdu.txt").write_text(script, encoding="utf-8")
 

@@ -29,7 +29,6 @@ STORIES: list[EditorialContent] = [
             "کرناٹک کی چاروں نشستیں بی جے پی اور جے ڈی ایس اتحاد نے جیت لیں",
             "بنگلورو ٹیچرز نشست پر جے ڈی ایس کے اے پی رنگاناتھ نے کانگریس کے پٹنا کو نو سو آٹھ ووٹوں سے شکست دی",
             "کانگریس رہنما پرینک کھرگے نے کہا کہ پارٹی عوامی فیصلے کو قبول کرتی ہے",
-            f"ماخذ: انڈیا ٹوڈے اور انڈین ایکسپریس، {DATE_URDU}",
         ],
         roman_headline="Council elections: Congress wins zero in four states",
         roman_bullets=[],
@@ -47,7 +46,6 @@ STORIES: list[EditorialContent] = [
             "حیدرآباد سکریٹریٹ میں نائب وزیر اعلیٰ بھٹی وکرمارکا کی صدارت میں کل جماعتی اجلاس ہوا",
             "مجلس، بی آر ایس، بی جے پی، سی پی آئی، سی پی ایم اور ٹی جے ایس کے نمائندوں نے شرکت کی",
             "پینے کے پانی، آبپاشی کے لیے بجلی کی فراہمی اور متبادل فصلوں پر تبادلہ خیال ہوا",
-            f"ماخذ: دی ہنس انڈیا، {DATE_URDU}",
         ],
         roman_headline="Telangana all-party meet on drought and El Nino",
         roman_bullets=[],
@@ -61,7 +59,6 @@ STORIES: list[EditorialContent] = [
             "وزیر اعلیٰ ریونت ریڈی نے پانی کی قلت روکنے کے لیے افسران کو واضح ہدایات جاری کیں",
             "سیوریج ٹریٹمنٹ پلانٹس سو فیصد صلاحیت پر چلائے جائیں گے اور تعمیراتی کاموں میں صاف شدہ پانی کا استعمال لازمی ہوگا",
             "یکم نومبر سے اقدامات پر عمل درآمد ہوگا اور کمانڈ کنٹرول مرکز سے نگرانی کی جائے گی",
-            f"ماخذ: دی ہنس انڈیا، {DATE_URDU}",
         ],
         roman_headline="CM orders steps to prevent Hyderabad water shortage",
         roman_bullets=[],
@@ -73,7 +70,6 @@ STORIES: list[EditorialContent] = [
         urdu_headline="تلنگانہ کے تین سو پینسٹھ منڈل خشک سالی متاثرہ قرار",
         urdu_bullets=[
             "ریاستی حکومت کے مطابق ایک سو گیارہ منڈل شدید اور دو سو چون منڈل معتدل خشک سالی متاثرہ قرار دیے گئے ہیں",
-            "ماخذ: انڈ ٹوڈے تلنگانہ",
         ],
         roman_headline="Telangana declares 365 mandals drought-affected",
         roman_bullets=[],
@@ -86,7 +82,6 @@ STORIES: list[EditorialContent] = [
         urdu_bullets=[
             "ریاستی الیکشن کمیشن نے ایم پی ٹی سی اور زیڈ پی ٹی سی انتخابات کی پولنگ کی تاریخ بدل دی ہے",
             "نئے شیڈول کے مطابق پولنگ اب پانچ نومبر کو ہوگی",
-            f"ماخذ: انڈ ٹوڈے، {DATE_URDU}",
         ],
         roman_headline="Andhra Pradesh local body polling moved to November 5",
         roman_bullets=[],
@@ -98,7 +93,6 @@ STORIES: list[EditorialContent] = [
         urdu_headline="بی آر ایس کا گریجویٹ ووٹر اندراج کی مدت بڑھانے کا مطالبہ",
         urdu_bullets=[
             "بی آر ایس نے الیکشن حکام سے گریجویٹ ووٹرز کے اندراج کی آخری تاریخ میں توسیع کا مطالبہ کیا ہے",
-            f"ماخذ: انڈ ٹوڈے، {DATE_URDU}",
         ],
         roman_headline="BRS seeks extension of graduate voter registration",
         roman_bullets=[],
@@ -111,7 +105,6 @@ STORIES: list[EditorialContent] = [
         urdu_bullets=[
             "رپورٹس کے مطابق جسٹس تاپابراتا چکرابورتی کے نام کی سفارش کی گئی ہے",
             "فی الحال یہ سفارش سے متعلق رپورٹ ہے، تصدیق شدہ تقرری نہیں",
-            f"ماخذ: انڈ ٹوڈے، {DATE_URDU}",
         ],
         roman_headline="Report: name recommended for Telangana HC Chief Justice",
         roman_bullets=[],
@@ -133,7 +126,10 @@ def main() -> None:
         photo = photo_dir / f"story{i}.jpg"
         if photo.exists():
             story.media = [{"local_path": str(photo)}]
-    result = build_bulletin(STORIES, out_dir, config=CONFIG)
+    result = build_bulletin(
+        STORIES, out_dir, config=CONFIG,
+        closing_credit=("آج کے بلیٹن کی خبریں انڈیا ٹوڈے، انڈین ایکسپریس، "
+                        "دی ہنس انڈیا اور انڈ ٹوڈے سے لی گئی ہیں، " + DATE_URDU))
     (out_dir / "bulletin_meta.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: result[k] for k in
