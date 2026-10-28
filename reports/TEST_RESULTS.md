@@ -48,3 +48,8 @@ Live publishing remains disabled until operator approval, all safety flags, and 
 - Every Short now opens: "آزاد اسٹوڈیو میں خوش آمدید" + "آج کی تازہ ترین خبریں" (Welcome to AZAD STUDIO, today's latest news), then headline/bullets. Breaking Shorts insert "بریکنگ نیوز" after the intro.
 - Tests: 39 passed (welcome test now also asserts the today's-latest-news line).
 - Proof upload with corrected intro: https://www.youtube.com/shorts/dMOtC0t-hdM (supersedes test RinpRzD4xeU, which had no intro; owner may delete it).
+
+## Facebook verify fallback fix (hourly runs failing at Verify Page identity)
+- Root cause: expired user token dropped verify to the Page-token fallback, which requested the `tasks` field directly on the Page node; Graph rejects that with `(#100)` for Page tokens, so hourly runs stopped before scan/publish.
+- Fix: fallback requests `id,name,link,category` only (tasks still honoured if present) and accepts `/me` resolving to the Page itself (only true for the Page's own token) as capability proof.
+- Tests: full suite passing.

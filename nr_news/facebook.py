@@ -178,7 +178,10 @@ class FacebookGraphClient:
         try:
             confirmed = self._call(
                 "GET", f"/{page_id}", token=self.config.facebook_page_token or "",
-                params={"fields": "id,name,link,category,tasks"},
+                # NOTE: "tasks" is only exposed via /me/accounts with a user
+                # token; requesting it here with a Page token fails the whole
+                # call with "(#100) Tried accessing nonexisting field (tasks)".
+                params={"fields": "id,name,link,category"},
             )
         except GraphAPIError as exc:
             self.db.insert_api_event("facebook", "verify_page_token_fallback", "error", str(exc),
@@ -204,6 +207,17 @@ class FacebookGraphClient:
             # direct Page read can confirm the role instead.
             granted = {}
 
+        # Definitive Page-token proof: /me resolved with a Page token IS the
+        # Page itself, so an id match confirms this token belongs to the Page.
+        me_is_page = False
+        try:
+            me_payload = self._call("GET", "/me",
+                                    token=self.config.facebook_page_token or "",
+                                    params={"fields": "id,name"})
+            me_is_page = str(me_payload.get("id") or "") == str(page_id)
+        except GraphAPIError:
+            me_is_page = False
+
         if tasks:
             missing_tasks = sorted(self.REQUIRED_TASKS - tasks)
             if missing_tasks:
@@ -216,7 +230,7 @@ class FacebookGraphClient:
                 reason = "Page token reports missing required permissions: " + ", ".join(missing_permissions)
                 self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
                 return {"ok": False, "reason": reason}
-        if not tasks and not granted:
+        if not tasks and not granted and not me_is_page:
             reason = "Page token did not return the required tasks or permissions."
             self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
             return {"ok": False, "reason": reason}
