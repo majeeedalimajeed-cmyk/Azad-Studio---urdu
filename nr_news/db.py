@@ -387,6 +387,17 @@ class Database:
     def api_events(self, limit: int = 100) -> list[dict[str, Any]]:
         return self.query("SELECT * FROM api_events ORDER BY created_at DESC LIMIT ?", (limit,))
 
+    def open_reviews(self, reasons: list[str], limit: int = 20) -> list[dict[str, Any]]:
+        placeholders = ",".join("?" for _ in reasons)
+        return self.query(
+            f"SELECT * FROM review_queue WHERE status='open' AND reason IN ({placeholders}) "
+            "ORDER BY created_at ASC LIMIT ?",
+            (*reasons, limit),
+        )
+
+    def set_review_status(self, review_id: str, status: str) -> None:
+        self.execute("UPDATE review_queue SET status=? WHERE id=?", (status, review_id))
+
     def enqueue_job(self, job_type: str, payload: dict[str, Any], dedupe_key: str | None = None,
                     delay_seconds: int = 0, priority: int = 0) -> str | None:
         if dedupe_key:

@@ -523,6 +523,32 @@ def test_pixabay_search_keeps_large_images_with_small_webformat(tmp_path):
     assert hits[0]["id"] == 42
 
 
+def test_scan_requeues_llm_held_stories_only_when_gateway_available(tmp_path):
+    cfg = temp_config(tmp_path, llm_api_key="test-key", llm_model="openai/gpt-oss-120b",
+                      llm_api_base="https://api.groq.com/openai/v1")
+    pipeline = NewsPipeline(cfg)
+    candidate = sample_candidate()
+    cid, _ = pipeline.db.insert_candidate(pipeline.research._to_row(candidate, "test"))
+    pipeline.db.add_review(cid, None, "urdu_generation_unavailable", {"reason": "gateway down"})
+    pipeline.db.add_review(cid, None, "verification_hold", {"reason": "needs human"})
+
+    result = pipeline.scan("hourly", source_results=[])
+    assert result["requeued_held"] == 1
+    jobs = pipeline.db.query("SELECT * FROM jobs WHERE type='verify_story'")
+    assert len(jobs) == 1
+    open_rows = pipeline.db.open_reviews(["urdu_generation_unavailable",
+                                          "roman_urdu_translation_unavailable"])
+    assert open_rows == []
+    # Editorial holds are never auto-retried.
+    assert len(pipeline.db.open_reviews(["verification_hold"])) == 1
+
+    cfg2 = temp_config(tmp_path / "second")
+    pipeline2 = NewsPipeline(cfg2)
+    cid2, _ = pipeline2.db.insert_candidate(pipeline2.research._to_row(candidate, "test"))
+    pipeline2.db.add_review(cid2, None, "urdu_generation_unavailable", {"reason": "gateway down"})
+    assert pipeline2.requeue_llm_held() == 0
+
+
 def test_llm_retries_without_json_mode_when_gateway_rejects_it(tmp_path, monkeypatch):
     from nr_news import llm as llm_mod
 

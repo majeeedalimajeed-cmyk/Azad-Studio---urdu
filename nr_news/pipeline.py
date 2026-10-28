@@ -44,9 +44,11 @@ class NewsPipeline:
                                          redact(result.message, self.config.secret_values),
                                          result.http_status)
         new_ids = self.research.ingest(results, mode)
+        requeued = self.requeue_llm_held()
         self.db.insert_api_event("scheduler", "scan", "ok",
                                  f"{mode} scan examined {len(results)} configured sources",
                                  details={"new_candidates": len(new_ids),
+                                          "requeued_llm_held": requeued,
                                           "sources": [{"name": r.source, "ok": r.ok,
                                                        "items": r.item_count} for r in results]})
         return {
@@ -56,7 +58,47 @@ class NewsPipeline:
                          "http_status": r.http_status} for r in results],
             "new_candidates": new_ids,
             "jobs_queued": len(new_ids),
+            "requeued_held": requeued,
         }
+
+    def requeue_llm_held(self, limit: int = 10) -> int:
+        """Retry stories held only because the LLM gateway was unavailable.
+
+        Holds for editorial reasons (verification, validation, policy) are
+        never auto-retried. Gateway holds get one fresh verify+generate job
+        per scan (bounded), and stale stories exit via re-verification.
+        """
+        if not self.research.llm.available:
+            return 0
+        requeued = 0
+        seen: set[str] = set()
+        rows = self.db.open_reviews(
+            ["urdu_generation_unavailable", "roman_urdu_translation_unavailable"],
+            limit=limit * 3,
+        )
+        for row in rows:
+            candidate_id = row.get("candidate_id")
+            if not candidate_id:
+                continue
+            self.db.set_review_status(row["id"], "requeued")
+            if candidate_id in seen or requeued >= limit:
+                continue
+            seen.add(candidate_id)
+            candidate = self.db.get_candidate(candidate_id)
+            if not candidate or candidate.get("status") == "excluded":
+                continue
+            self.db.enqueue_job(
+                "verify_story", {"candidate_id": candidate_id},
+                dedupe_key=f"verify:{candidate_id}", priority=5,
+            )
+            requeued += 1
+        if requeued:
+            self.db.insert_api_event(
+                "scheduler", "requeue", "ok",
+                f"Requeued {requeued} LLM-held stories after gateway recovery",
+                details={"requeued": requeued},
+            )
+        return requeued
 
     def drain_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
         outputs: list[dict[str, Any]] = []
