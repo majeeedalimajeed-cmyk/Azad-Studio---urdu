@@ -225,6 +225,24 @@ def cmd_report(args) -> int:
         f"- Rendered cards: {len(status['cards'])}",
         f"- Publish attempts: success={status['publish_success']}, failed/unknown={status['publish_failed']}",
         "",
+        "## Open review reasons",
+    ]
+    reason_counts: dict[str, int] = {}
+    for item in status["review_open"]:
+        reason_counts[item["reason"]] = reason_counts.get(item["reason"], 0) + 1
+    for reason, count in sorted(reason_counts.items(), key=lambda kv: -kv[1]):
+        lines.append(f"- {reason}: {count}")
+    if not reason_counts:
+        lines.append("- None")
+    lines += ["", "## Latest review items"]
+    for item in status["review_open"][:10]:
+        cand = db.get_candidate(item["candidate_id"]) if item.get("candidate_id") else None
+        headline = (cand or {}).get("original_headline", "")
+        lines.append(f"- [{item['reason']}] {headline[:110]}")
+    if not status["review_open"]:
+        lines.append("- None")
+    lines += [
+        "",
         "## Rendered cards",
     ]
     recent_cards = db.cards(20)
