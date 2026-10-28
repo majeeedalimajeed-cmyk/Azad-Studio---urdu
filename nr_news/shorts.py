@@ -361,13 +361,10 @@ def build_short(content: EditorialContent, out_dir: Path,
         fc_full = (
             f"[0:v][1:v]overlay=x='1080-mod((t+{elapsed:.2f})*130\\,{1080 + strip_w})'"
             ":y=1721[t1];[t1][2:v]overlay=0:1690[t2];"
-            f"[t2]fade=t=in:st=0:d=0.15,fade=t=out:st={fade_out:.2f}:d=0.15,"
+            f"[t2]"
             "format=yuv420p[v]"
         )
-        vf_plain = (
-            "scale=1080:1920,fade=t=in:st=0:d=0.15,"
-            f"fade=t=out:st={fade_out:.2f}:d=0.15,format=yuv420p"
-        )
+        vf_plain = "scale=1080:1920,format=yuv420p"  # hard cuts only: fades read as blinking
         attempts = [
             [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide),
              "-loop", "1", "-i", str(strip_path), "-loop", "1", "-i", str(label_path),
@@ -655,13 +652,20 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
 
     from .renderer import font as _pil_font, isolate_latin
 
-    ticker_text = "AZAD STUDIO POLITICAL BULLETIN"
-    strip_font = _pil_font(config.latin_font_path, 30, "Medium")
+    # Urdu news ticker: short verified headlines from the actual stories
+    # in this bulletin (never channel-name filler). No headlines -> no
+    # ticker at all rather than placeholder text.
+    headlines = [clean_text(s.urdu_headline, 120).rstrip("۔. ").strip()
+                 for s in stories]
+    ticker_text = "   •   ".join(h for h in headlines if h)
+    strip_font = ImageFont.truetype(str(config.urdu_font_path), 32)
     probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
-    strip_w = int(probe.textlength(ticker_text, font=strip_font)) + 160
-    strip = Image.new("RGBA", (strip_w, 64), (0, 0, 0, 0))
-    ImageDraw.Draw(strip).text((80, 32), ticker_text, font=strip_font,
-                               fill=(235, 238, 245, 255), anchor="lm")
+    strip_w = int(probe.textlength(ticker_text, font=strip_font)) + 160 if ticker_text else 0
+    strip = Image.new("RGBA", (max(strip_w, 10), 64), (0, 0, 0, 0))
+    if ticker_text:
+        ImageDraw.Draw(strip).text((80, 32), isolate_latin(ticker_text),
+                                   font=strip_font, fill=(235, 238, 245, 255),
+                                   anchor="lm", direction="rtl", language="ur")
     strip_path = seg_dir / "ticker_strip.png"
     strip.save(strip_path)
     label = Image.new("RGBA", (238, 126), (0, 0, 0, 0))
@@ -698,13 +702,10 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
         fc_full = (
             f"[0:v][1:v]overlay=x='1080-mod((t+{elapsed:.2f})*130\\,{1080 + strip_w})'"
             ":y=1721[t1];[t1][2:v]overlay=0:1690[t2];"
-            f"[t2]fade=t=in:st=0:d=0.15,fade=t=out:st={fade_out:.2f}:d=0.15,"
+            f"[t2]"
             "format=yuv420p[v]"
         )
-        vf_plain = (
-            "scale=1080:1920,fade=t=in:st=0:d=0.15,"
-            f"fade=t=out:st={fade_out:.2f}:d=0.15,format=yuv420p"
-        )
+        vf_plain = "scale=1080:1920,format=yuv420p"  # hard cuts only: fades read as blinking
         attempts = [
             [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide),
              "-loop", "1", "-i", str(strip_path), "-loop", "1", "-i", str(label_path),
@@ -715,6 +716,8 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
              "-vf", vf_plain, "-af", f"apad,atrim=0:{clip_seconds:.2f}",
              "-map", "0:v", "-map", "1:a"],
         ]
+        if not ticker_text:
+            attempts = attempts[1:]  # no verified headlines -> no ticker
         built_clip = False
         proc = None
         for head in attempts:
