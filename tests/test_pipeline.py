@@ -724,16 +724,17 @@ def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
     built = shorts.build_short(content, tmp_path / "out", config=cfg)
     video = Path(built["video_path"])
     assert video.exists() and video.stat().st_size > 10_000
-    # welcome + today's-news + headline + 3 bullets, each 2.0s + 0.3s gap
+    # one merged intro sting + headline + 3 live bullets, each 2.0s + 0.15s
+    # gap; slide changes land on the per-segment TTS boundaries
     assert [s["kind"] for s in built["segments"]] == [
-        "welcome", "latest", "headline", "bullet", "bullet", "bullet"]
+        "intro", "headline", "bullet", "bullet", "bullet"]
     assert built["segments"][-1]["starts_at"] > built["segments"][0]["starts_at"]
-    assert built["duration_seconds"] == pytest.approx(6 * 2.3)
+    assert built["duration_seconds"] == pytest.approx(5 * 2.15)
     seg_dir = Path(built["video_path"]).parent / "segments"
     slides = sorted(seg_dir.glob("slide_*.png"))
-    assert len(slides) == 6
+    assert len(slides) == 5
     from PIL import Image as _Im
-    with _Im.open(slides[3]) as im:  # first bullet slide
+    with _Im.open(slides[2]) as im:  # first bullet slide
         assert im.size == (1080, 1920)
 
 
@@ -747,7 +748,7 @@ def test_urdu_script_starts_with_welcome():
     )
     normal = urdu_script(content)
     assert normal.startswith(WELCOME_URDU)
-    assert TODAYS_NEWS_URDU in normal.split("۔")[1]  # "...today's latest news" right after welcome
+    assert TODAYS_NEWS_URDU in normal.split("۔")[0]  # merged intro sting, one breath
     assert "Welcome" not in normal and "Headline" not in normal
     assert "چار" not in normal and "پانچ" not in normal  # scheduled: first 3 bullets
     full = urdu_script(content, full_details=True)

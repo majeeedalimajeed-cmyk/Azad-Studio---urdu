@@ -47,16 +47,17 @@ def detect_breaking(*texts: str | None) -> bool:
 def narration_segments(content: EditorialContent, *, full_details: bool = False) -> list[dict[str, Any]]:
     """Ordered narration segments; each becomes one timed slide + voice clip.
 
-    Segments: welcome -> today's-news intro -> [breaking announcement] ->
-    headline -> bullets. Scheduled Shorts read the first three bullets; a
-    breaking Short reads every bullet (full details).
+    Segments: one merged intro sting (welcome + today's-news) -> [breaking
+    announcement] -> headline -> bullets. Scheduled Shorts read the first
+    three bullets; a breaking Short reads every bullet (full details).
     """
     bullets = list(content.urdu_bullets)
     if not full_details:
         bullets = bullets[:3]
+    # One quick brand sting (welcome + today's-news in a single breath) so
+    # the viewer reaches the headline in ~2 seconds instead of two slides.
     segments: list[dict[str, Any]] = [
-        {"kind": "welcome", "text": WELCOME_URDU},
-        {"kind": "latest", "text": TODAYS_NEWS_URDU},
+        {"kind": "intro", "text": f"{WELCOME_URDU}، {TODAYS_NEWS_URDU}"},
     ]
     if full_details:
         segments.append({"kind": "breaking", "text": BREAKING_URDU})
@@ -122,7 +123,9 @@ def _run_ffmpeg(cmd: list[str], config=CONFIG) -> subprocess.CompletedProcess:
 
 
 SLIDE_W, SLIDE_H = 1080, 1920
-SEGMENT_GAP_SECONDS = 0.30
+# Tight broadcast pacing: the slide changes land on the anchor's segment
+# boundaries (per-segment TTS timestamps), with only a breath between.
+SEGMENT_GAP_SECONDS = 0.15
 _FPS = 30
 
 
@@ -130,9 +133,11 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
                  out_path: Path, *, config=CONFIG) -> Path:
     """Render one 1080x1920 broadcast slide for a narration segment.
 
-    Premium dark newsroom look: brand bar with the exact monogram, headline
-    context kept on screen, the active bullet highlighted in a gold-framed
-    card with progress dots, and a red-label ticker bar along the bottom.
+    Premium dark newsroom look: slim brand bar with the exact monogram,
+    a tall story-photo band, headline context kept on screen, and ONE
+    large live bullet at a time (gold accent bar, small progress dots,
+    no boxed card), synchronised segment-by-segment to the anchor's TTS.
+    A red-label ticker bar runs along the bottom.
     """
     from PIL import Image, ImageDraw
 
@@ -157,18 +162,18 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
                    anchor=anchor, direction="rtl", language="ur")
         return lines, fnt, lh
 
-    # --- Brand bar ------------------------------------------------------
-    d.rectangle((0, 0, SLIDE_W, 150), fill=(6, 8, 16))
-    d.rectangle((0, 150, SLIDE_W, 154), fill=(226, 184, 74))
-    scaled = proportional_logo(logo, 104)
-    im.paste(scaled, (44, 23), scaled)
-    brand_f = renderer._font(False, 42, "Bold")
-    d.text((44 + scaled.width + 26, 75), "AZAD STUDIO", font=brand_f,
+    # --- Brand bar (slim: logo -> news fast) ----------------------------
+    d.rectangle((0, 0, SLIDE_W, 112), fill=(6, 8, 16))
+    d.rectangle((0, 112, SLIDE_W, 116), fill=(226, 184, 74))
+    scaled = proportional_logo(logo, 84)
+    im.paste(scaled, (40, 14), scaled)
+    brand_f = renderer._font(False, 38, "Bold")
+    d.text((40 + scaled.width + 22, 56), "AZAD STUDIO", font=brand_f,
            fill=(255, 231, 151), anchor="lm")
-    d.rounded_rectangle((SLIDE_W - 292, 44, SLIDE_W - 44, 106), radius=31,
+    d.rounded_rectangle((SLIDE_W - 262, 30, SLIDE_W - 40, 82), radius=26,
                         fill=(190, 24, 35))
-    latest_f = renderer._font(False, 32, "Bold")
-    d.text((SLIDE_W - 168, 75), "LATEST", font=latest_f, fill=(255, 255, 255),
+    latest_f = renderer._font(False, 28, "Bold")
+    d.text((SLIDE_W - 151, 56), "LATEST", font=latest_f, fill=(255, 255, 255),
            anchor="mm")
 
     def photo_band() -> None:
@@ -187,29 +192,29 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
             if lp and Path(lp).exists():
                 try:
                     with Image.open(lp) as src:
-                        fitted = ImageOps.fit(src.convert("RGB"), (SLIDE_W, 446))
-                    im.paste(fitted, (0, 154))
+                        fitted = ImageOps.fit(src.convert("RGB"), (SLIDE_W, 620))
+                    im.paste(fitted, (0, 116))
                     used = True
                     break
                 except Exception:
                     continue
         if not used:
-            d.rectangle((0, 154, SLIDE_W, 600), fill=(10, 15, 28))
+            d.rectangle((0, 116, SLIDE_W, 736), fill=(10, 15, 28))
             try:
-                wm = proportional_logo(logo, 320)
+                wm = proportional_logo(logo, 380)
                 if wm.mode != "RGBA":
                     wm = wm.convert("RGBA")
                 wm.putalpha(wm.split()[3].point(lambda a: int(a * 0.15)))
-                im.paste(wm, (SLIDE_W - wm.width - 30, 210), wm)
+                im.paste(wm, (SLIDE_W - wm.width - 30, 260), wm)
             except Exception:
                 pass
         # Fade the band's lower edge into the page for a clean join.
-        fade = Image.new("L", (1, 110))
-        for yy in range(110):
-            fade.putpixel((0, yy), int(255 * yy / 109))
-        im.paste(Image.new("RGB", (SLIDE_W, 110), (4, 6, 12)), (0, 490),
-                 fade.resize((SLIDE_W, 110)))
-        d.rectangle((0, 597, SLIDE_W, 600), fill=(226, 184, 74))
+        fade = Image.new("L", (1, 120))
+        for yy in range(120):
+            fade.putpixel((0, yy), int(255 * yy / 119))
+        im.paste(Image.new("RGB", (SLIDE_W, 120), (4, 6, 12)), (0, 616),
+                 fade.resize((SLIDE_W, 120)))
+        d.rectangle((0, 733, SLIDE_W, 736), fill=(226, 184, 74))
 
     # --- Segment body ---------------------------------------------------
     kind = segment["kind"]
@@ -226,56 +231,61 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
         sub_f = renderer._font(False, 30, "SemiBold")
         d.text((SLIDE_W // 2, 1000), "AZAD STUDIO", font=sub_f,
                fill=(226, 184, 74), anchor="mm")
+    elif kind == "intro":
+        # One quick brand sting: big monogram + welcome + today's-news in a
+        # single ~2s slide (GPT: short intro; no two-slide opening).
+        from .renderer import paste_logo
+        paste_logo(im, logo, SLIDE_W // 2, 400, 250)
+        rtl(WELCOME_URDU, 66, fill=(255, 231, 151),
+            xy=(SLIDE_W // 2, 760), anchor="mm", max_lines=2)
+        rtl(TODAYS_NEWS_URDU, 48, fill=(248, 247, 242),
+            xy=(SLIDE_W // 2, 900), anchor="mm", max_lines=2)
     elif kind == "breaking":
         photo_band()
-        d.rounded_rectangle((80, 680, SLIDE_W - 80, 900), radius=36,
+        d.rounded_rectangle((80, 760, SLIDE_W - 80, 980), radius=36,
                             fill=(190, 24, 35))
-        rtl(segment["text"], 78, fill=(255, 255, 255),
-            xy=(SLIDE_W // 2, 790), anchor="mm", max_lines=1)
-        rtl(content.urdu_headline, 38, fill=(226, 214, 180),
-            xy=(SLIDE_W - 80, 990), anchor="ra", max_width=920, max_lines=3)
+        rtl(segment["text"], 82, fill=(255, 255, 255),
+            xy=(SLIDE_W // 2, 872), anchor="mm", max_lines=1)
+        rtl(content.urdu_headline, 44, fill=(226, 214, 180),
+            xy=(SLIDE_W - 80, 1070), anchor="ra", max_width=920, max_lines=3)
     elif kind == "headline":
         photo_band()
         # Today's-news kicker, then the story headline large and readable.
-        d.rectangle((SLIDE_W - 62, 646, SLIDE_W - 50, 682), fill=(190, 24, 35))
+        d.rectangle((SLIDE_W - 62, 766, SLIDE_W - 50, 802), fill=(190, 24, 35))
         rtl(TODAYS_NEWS_URDU, 30, fill=(226, 184, 74),
-            xy=(SLIDE_W - 84, 650), anchor="ra", max_lines=1)
-        rtl(segment["text"], 58, xy=(SLIDE_W - 80, 790), max_lines=4)
-    else:  # bullet: photo + persistent headline + one highlighted bullet
+            xy=(SLIDE_W - 84, 770), anchor="ra", max_lines=1)
+        rtl(segment["text"], 66, xy=(SLIDE_W - 80, 900), max_lines=4)
+    else:  # bullet: bigger photo, headline stays, ONE large live bullet
         photo_band()
-        rtl(content.urdu_headline, 36, fill=(228, 232, 242),
-            xy=(SLIDE_W - 80, 648), max_lines=3)
-        d.rounded_rectangle((56, 900, SLIDE_W - 56, 1500), radius=30,
-                            fill=(13, 18, 32), outline=(226, 184, 74), width=3)
-        d.rectangle((SLIDE_W - 84, 940, SLIDE_W - 70, 1460), fill=(226, 184, 74))
-        badge_cx, badge_cy = SLIDE_W - 150, 992
-        d.ellipse((badge_cx - 36, badge_cy - 36, badge_cx + 36, badge_cy + 36),
-                  fill=(226, 184, 74))
-        num_f = renderer._font(False, 38, "Bold")
-        d.text((badge_cx, badge_cy + 2), str(segment["index"]), font=num_f,
-               fill=(20, 14, 2), anchor="mm")
-        # Fit at a large readable size, then centre inside the card.
-        size = 48
+        rtl(content.urdu_headline, 40, fill=(228, 232, 242),
+            xy=(SLIDE_W - 80, 770), max_lines=3)
+        # No boxed card (it read like a slideshow): a gold accent bar, the
+        # wired bullet large, and small progress dots only.
+        d.rectangle((SLIDE_W - 72, 1010, SLIDE_W - 56, 1590),
+                    fill=(226, 184, 74))
+        size = 58
         while True:
             fnt_b = renderer._font(True, size, "Bold")
-            lines_b = renderer.wrap(d, segment["text"], fnt_b, SLIDE_W - 280, True)
-            if len(lines_b) <= 6 or size <= 32:
+            lines_b = renderer.wrap(d, segment["text"], fnt_b, SLIDE_W - 240, True)
+            if len(lines_b) <= 6 or size <= 38:
                 break
             size -= 2
         lh_b = size * 1.65
-        y_text = 960 + max(0.0, (470 - len(lines_b) * lh_b) / 2)
+        y_text = 1020 + max(0.0, (560 - len(lines_b) * lh_b) / 2)
         for i, line in enumerate(lines_b):
-            d.text((SLIDE_W - 130, y_text + i * lh_b), isolate_latin(line),
+            d.text((SLIDE_W - 120, y_text + i * lh_b), isolate_latin(line),
                    font=fnt_b, fill=(248, 247, 242), anchor="ra",
                    direction="rtl", language="ur")
         total = int(segment.get("total") or 1)
         idx = int(segment.get("index") or 1)
-        dots_w = total * 46 - 24
-        x0 = (SLIDE_W - dots_w) // 2
-        for i in range(1, total + 1):
-            cx = x0 + (i - 1) * 46 + 11
-            d.ellipse((cx - 11, 1579, cx + 11, 1601),
-                      fill=(226, 184, 74) if i <= idx else (74, 82, 104))
+        if total > 1:
+            dots_w = total * 40 - 20
+            x0 = (SLIDE_W - dots_w) // 2
+            for i in range(1, total + 1):
+                cx = x0 + (i - 1) * 40 + 10
+                rr = 10 if i == idx else 7
+                d.ellipse((cx - rr, 1636 - rr, cx + rr, 1636 + rr),
+                          fill=(226, 184, 74) if i == idx else (74, 82, 104))
 
     # --- Ticker bar (red label + scrolling strip are overlaid at build) --
     d.rectangle((0, 1690, SLIDE_W, 1816), fill=(2, 2, 4))
@@ -340,16 +350,16 @@ def build_short(content: EditorialContent, out_dir: Path,
         clip_seconds = seg_seconds + SEGMENT_GAP_SECONDS
         slide = render_slide(content, seg, seg_dir / f"slide_{i:02d}.png", config=config)
         clip = seg_dir / f"clip_{i:02d}.mp4"
-        fade_out = max(0.0, clip_seconds - 0.22)
+        fade_out = max(0.0, clip_seconds - 0.15)
         fc_full = (
             f"[0:v][1:v]overlay=x='1080-mod((t+{elapsed:.2f})*130\\,{1080 + strip_w})'"
             ":y=1721[t1];[t1][2:v]overlay=0:1690[t2];"
-            f"[t2]fade=t=in:st=0:d=0.22,fade=t=out:st={fade_out:.2f}:d=0.22,"
+            f"[t2]fade=t=in:st=0:d=0.15,fade=t=out:st={fade_out:.2f}:d=0.15,"
             "format=yuv420p[v]"
         )
         vf_plain = (
-            "scale=1080:1920,fade=t=in:st=0:d=0.22,"
-            f"fade=t=out:st={fade_out:.2f}:d=0.22,format=yuv420p"
+            "scale=1080:1920,fade=t=in:st=0:d=0.15,"
+            f"fade=t=out:st={fade_out:.2f}:d=0.15,format=yuv420p"
         )
         attempts = [
             [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide),
