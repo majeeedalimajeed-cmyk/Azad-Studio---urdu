@@ -51,6 +51,15 @@ class LLMClient:
             response = requests.post(url, headers=headers, json=payload, timeout=90)
         except requests.RequestException as exc:
             raise AgentUnavailable(redact(f"LLM request failed: {type(exc).__name__}", self.config.secret_values)) from exc
+        if response.status_code >= 400 and "response_format" in response.text:
+            # Some OpenAI-compatible gateways (e.g. Groq-hosted models) reject
+            # JSON mode. Retry once without it; _parse_json still enforces a
+            # JSON object in the reply.
+            payload.pop("response_format", None)
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=90)
+            except requests.RequestException as exc:
+                raise AgentUnavailable(redact(f"LLM request failed: {type(exc).__name__}", self.config.secret_values)) from exc
         if response.status_code >= 400:
             body = redact(response.text[:1000], self.config.secret_values)
             raise AgentUnavailable(f"LLM HTTP {response.status_code}: {body}")

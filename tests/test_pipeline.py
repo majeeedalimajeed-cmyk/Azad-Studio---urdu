@@ -523,6 +523,34 @@ def test_pixabay_search_keeps_large_images_with_small_webformat(tmp_path):
     assert hits[0]["id"] == 42
 
 
+def test_llm_retries_without_json_mode_when_gateway_rejects_it(tmp_path, monkeypatch):
+    from nr_news import llm as llm_mod
+
+    cfg = temp_config(tmp_path, llm_api_key="test-key", llm_model="openai/gpt-oss-120b",
+                      llm_api_base="https://api.groq.com/openai/v1")
+    calls = []
+
+    class Resp:
+        def __init__(self, status, payload):
+            self.status_code = status
+            self._payload = payload
+            self.text = str(payload)
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        if "response_format" in (json or {}):
+            return Resp(400, {"error": {"message": "response_format is not supported"}})
+        return Resp(200, {"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+    monkeypatch.setattr(llm_mod.requests, "post", fake_post)
+    out = llm_mod.LLMClient(cfg).chat_json(system="s", user={"x": 1})
+    assert out == {"ok": True}
+    assert len(calls) == 2 and "response_format" not in calls[1]
+
+
 def test_pixabay_query_uses_relevant_story_terms():
     candidate = sample_candidate(
         original_headline="Hyderabad government election policy decision",
