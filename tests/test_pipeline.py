@@ -495,6 +495,34 @@ def test_pixabay_relax_query_shortens_specific_phrases():
     assert PixabayClient.relax_query("parliament session") == ["parliament session"]
 
 
+def test_pixabay_search_keeps_large_images_with_small_webformat(tmp_path):
+    cfg = temp_config(tmp_path, pixabay_enabled=True, pixabay_api_key="test-key")
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"hits": [{
+                "id": 42, "type": "photo", "tags": "education, exam",
+                "webformatURL": "https://cdn.example/42_640.jpg",
+                "webformatWidth": 640, "webformatHeight": 360,
+                "largeImageURL": "https://cdn.example/42_1280.jpg",
+                "imageWidth": 1920, "imageHeight": 1080,
+                "user": "exam_demo", "user_id": 7,
+            }]}
+
+    class FakeSession:
+        headers: dict = {}
+
+        def get(self, url, params=None, timeout=None):
+            return FakeResponse()
+
+    client = PixabayClient(config=cfg, session=FakeSession())
+    hits = client.search("education exam students")
+    assert len(hits) == 1
+    assert hits[0]["id"] == 42
+
+
 def test_pixabay_query_uses_relevant_story_terms():
     candidate = sample_candidate(
         original_headline="Hyderabad government election policy decision",

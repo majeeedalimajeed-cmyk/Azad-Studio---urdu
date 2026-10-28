@@ -211,12 +211,19 @@ class PixabayClient:
             self._log("error", "search", "Pixabay returned non-JSON response.", query=query)
             return []
         hits = [self._sanitize_hit(h) for h in data.get("hits", []) if isinstance(h, dict)]
+
+        def _dim(hit: dict[str, Any], large: str, small: str) -> int:
+            # Downloads use largeImageURL, so judge size by the full image
+            # dimensions; webformat previews are only 640px and would wrongly
+            # filter out every usable photo.
+            return max(int(hit.get(large) or 0), int(hit.get(small) or 0))
+
         hits = [
             h for h in hits
             if str(h.get("type", "")).lower() == "photo"
             and (h.get("largeImageURL") or h.get("webformatURL"))
-            and int(h.get("webformatWidth") or h.get("imageWidth") or 0) >= self.config.pixabay_min_width
-            and int(h.get("webformatHeight") or h.get("imageHeight") or 0) >= self.config.pixabay_min_height
+            and _dim(h, "imageWidth", "webformatWidth") >= self.config.pixabay_min_width
+            and _dim(h, "imageHeight", "webformatHeight") >= self.config.pixabay_min_height
         ][: self.config.max_photos_per_card]
         cache_path.write_text(
             json_dumps({"cached_at": time.time(), "query": query, "hits": hits}),
