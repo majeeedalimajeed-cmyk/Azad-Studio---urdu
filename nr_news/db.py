@@ -398,6 +398,18 @@ class Database:
     def set_review_status(self, review_id: str, status: str) -> None:
         self.execute("UPDATE review_queue SET status=? WHERE id=?", (status, review_id))
 
+    def close_open_reviews(self, candidate_id: str, reason: str, status: str = "superseded") -> None:
+        self.execute(
+            "UPDATE review_queue SET status=? WHERE candidate_id=? AND reason=? AND status='open'",
+            (status, candidate_id, reason),
+        )
+
+    def candidates_by_status(self, status: str, limit: int = 20) -> list[dict[str, Any]]:
+        return self.query(
+            "SELECT * FROM candidates WHERE status=? ORDER BY published_at DESC LIMIT ?",
+            (status, limit),
+        )
+
     def enqueue_job(self, job_type: str, payload: dict[str, Any], dedupe_key: str | None = None,
                     delay_seconds: int = 0, priority: int = 0) -> str | None:
         if dedupe_key:

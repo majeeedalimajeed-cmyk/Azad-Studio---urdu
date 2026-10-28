@@ -523,6 +523,42 @@ def test_pixabay_search_keeps_large_images_with_small_webformat(tmp_path):
     assert hits[0]["id"] == 42
 
 
+def test_single_source_substantial_report_verifies_but_claims_hold(tmp_path):
+    cfg = temp_config(tmp_path)
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    body = (
+        "The Telangana government on Tuesday announced a new education policy for "
+        "government schools in Hyderabad, setting out teacher recruitment timelines, "
+        "infrastructure upgrades and a district-wise implementation schedule. Officials "
+        "said the first phase covers 120 schools and begins next month, with budgets "
+        "allocated for classrooms, laboratories and digital learning equipment across "
+        "the state, according to the official statement issued after the cabinet meeting."
+    )
+    candidate = sample_candidate(body_excerpt=body)
+    cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
+    result = VerificationAgent(db, config=cfg).verify(cid)
+    assert result.approved is True
+    assert any("Single-source" in e for e in result.evidence)
+
+    claim = sample_candidate(
+        url="https://example.org/policy-story-2",
+        original_headline="Opposition alleges irregularities in education policy",
+        body_excerpt=body + " The opposition alleged that the process was opaque.",
+    )
+    cid2, _ = db.insert_candidate(pipeline.research._to_row(claim, "test"))
+    result2 = VerificationAgent(db, config=cfg).verify(cid2)
+    assert result2.approved is False
+
+    short = sample_candidate(
+        url="https://example.org/policy-story-3",
+        body_excerpt="A short education policy update from Hyderabad.",
+    )
+    cid3, _ = db.insert_candidate(pipeline.research._to_row(short, "test"))
+    result3 = VerificationAgent(db, config=cfg).verify(cid3)
+    assert result3.approved is False
+
+
 def test_scan_requeues_llm_held_stories_only_when_gateway_available(tmp_path):
     cfg = temp_config(tmp_path, llm_api_key="test-key", llm_model="openai/gpt-oss-120b",
                       llm_api_base="https://api.groq.com/openai/v1")

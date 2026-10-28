@@ -44,7 +44,7 @@ class NewsPipeline:
                                          redact(result.message, self.config.secret_values),
                                          result.http_status)
         new_ids = self.research.ingest(results, mode)
-        requeued = self.requeue_llm_held()
+        requeued = self.requeue_llm_held() + self.requeue_verification_held()
         self.db.insert_api_event("scheduler", "scan", "ok",
                                  f"{mode} scan examined {len(results)} configured sources",
                                  details={"new_candidates": len(new_ids),
@@ -96,6 +96,29 @@ class NewsPipeline:
             self.db.insert_api_event(
                 "scheduler", "requeue", "ok",
                 f"Requeued {requeued} LLM-held stories after gateway recovery",
+                details={"requeued": requeued},
+            )
+        return requeued
+
+    def requeue_verification_held(self, limit: int = 10) -> int:
+        """Re-verify held stories each scan (bounded, newest first).
+
+        Corroboration can arrive after the first attempt; re-verification is
+        cheap (no LLM call until approval) and stale stories stay held.
+        """
+        requeued = 0
+        for candidate in self.db.candidates_by_status("held", limit=limit):
+            self.db.close_open_reviews(candidate["id"], "verification_hold",
+                                       status="requeued")
+            self.db.enqueue_job(
+                "verify_story", {"candidate_id": candidate["id"]},
+                dedupe_key=f"verify:{candidate['id']}", priority=4,
+            )
+            requeued += 1
+        if requeued:
+            self.db.insert_api_event(
+                "scheduler", "requeue", "ok",
+                f"Requeued {requeued} verification-held stories for re-check",
                 details={"requeued": requeued},
             )
         return requeued

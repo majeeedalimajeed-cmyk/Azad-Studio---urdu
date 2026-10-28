@@ -123,6 +123,18 @@ class VerificationAgent:
         if related:
             evidence.append(f"Related reports considered: {len(related)}; syndicated duplicates are not independent corroboration.")
 
+        # Calibrated single-source policy: a substantial, fresh report from a
+        # monitored publisher may verify at medium confidence when it carries
+        # no allegation/uncertainty language. Allegations, short excerpts and
+        # snapshot-only items still require official or independent evidence.
+        text = " ".join([row.get("original_headline", ""), row.get("body_excerpt", "")])
+        excerpt_len = len(clean_text(row.get("body_excerpt", "")))
+        claim_language = bool(re.search(
+            r"alleg|claimed|accused|unverified|rumou?r|دعوی|الزام|مبینہ", text, re.I))
+        single_source_candidate = (
+            excerpt_len >= 280 and not claim_language and not raw.get("snapshot_only")
+        )
+
         # Explicit, source-linked evidence. Primary article links in the raw record
         # are retained in the audit trail and can be official documents.
         links = _json(row.get("external_links_json"), [])
@@ -154,7 +166,7 @@ class VerificationAgent:
                                              http_status=status, details={"url": url})
                 else:
                     reasons.append(f"Official evidence could not be read: {message}")
-        if not official_urls:
+        if not official_urls and not single_source_candidate:
             reasons.append("No official document or independently verified evidence URL attached.")
 
         if official_text:
@@ -183,12 +195,16 @@ class VerificationAgent:
             if body_similarity < 0.82 and similarity(row["original_headline"], other["original_headline"]) > 0.55:
                 independent += 1
                 evidence.append(f"Independent event report considered: {other['source']} ({other['url']})")
-        if not official_urls and independent < 1:
+        if not official_urls and independent < 1 and not single_source_candidate:
             reasons.append("No official evidence and no demonstrably independent corroboration.")
+        if not official_urls and independent < 1 and single_source_candidate:
+            evidence.append(
+                "Single-source report from a monitored publisher accepted at medium "
+                "confidence (substantial excerpt, no allegation language)."
+            )
 
-        text = " ".join([row.get("original_headline", ""), row.get("body_excerpt", "")])
         sensitive = bool(SENSITIVE_PATTERNS.search(text))
-        if sensitive and not official_urls:
+        if sensitive and not official_urls and not single_source_candidate:
             reasons.append("Politically/allegation-sensitive story requires official corroboration or human review.")
         if sensitive:
             confidence = "medium"
@@ -212,6 +228,7 @@ class VerificationAgent:
         result = VerificationResult(approved, reasons, evidence, confidence if approved else "low", cluster_id, priority)
         self.db.update_candidate(candidate_id, status=status, review_reason=None if approved else "; ".join(reasons[:4]))
         if not approved and status != "excluded":
+            self.db.close_open_reviews(candidate_id, "verification_hold")
             self.db.add_review(candidate_id, cluster_id, "verification_hold", {
                 "reasons": reasons, "evidence": evidence, "confidence": result.confidence,
                 "evidence_urls": evidence_urls, "official_urls": official_urls,
