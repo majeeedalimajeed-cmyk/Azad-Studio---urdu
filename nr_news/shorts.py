@@ -44,6 +44,13 @@ def detect_breaking(*texts: str | None) -> bool:
     return any(marker in blob for marker in BREAKING_MARKERS)
 
 
+def _is_source_credit(text: str) -> bool:
+    """True for source-credit lines (e.g. 'ماخذ: ...'), which the operator
+    has banned from narration in all videos — never spoken, not even once."""
+    t = (text or "").strip().lstrip("۔. ").strip()
+    return t.startswith(("ماخذ", "ذریعہ", "ذرائع")) or t.lower().startswith("source")
+
+
 def narration_segments(content: EditorialContent, *, full_details: bool = False) -> list[dict[str, Any]]:
     """Ordered narration segments; each becomes one timed slide + voice clip.
 
@@ -68,6 +75,8 @@ def narration_segments(content: EditorialContent, *, full_details: bool = False)
     cleaned: list[dict[str, Any]] = []
     for seg in segments:
         text = clean_text(seg["text"], 400).rstrip("۔. ").strip()
+        if seg["kind"] == "bullet" and _is_source_credit(text):
+            continue  # source credits are never narrated (operator rule)
         if text:
             cleaned.append({**seg, "text": text})
     return cleaned
@@ -476,6 +485,8 @@ def bulletin_segments(
     cleaned: list[tuple[EditorialContent, dict[str, Any]]] = []
     for story, seg in pairs:
         text = clean_text(seg["text"], 400).rstrip("۔. ").strip()
+        if seg["kind"] == "bullet" and _is_source_credit(text):
+            continue  # source credits are never narrated (operator rule)
         if text:
             cleaned.append((story, {**seg, "text": text}))
     return cleaned

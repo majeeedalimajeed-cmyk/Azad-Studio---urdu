@@ -126,10 +126,7 @@ def main() -> None:
         photo = photo_dir / f"story{i}.jpg"
         if photo.exists():
             story.media = [{"local_path": str(photo)}]
-    result = build_bulletin(
-        STORIES, out_dir, config=CONFIG,
-        closing_credit=("آج کے بلیٹن کی خبریں انڈیا ٹوڈے، انڈین ایکسپریس، "
-                        "دی ہنس انڈیا اور انڈ ٹوڈے سے لی گئی ہیں، " + DATE_URDU))
+    result = build_bulletin(STORIES, out_dir, config=CONFIG)
     (out_dir / "bulletin_meta.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: result[k] for k in

@@ -30,3 +30,16 @@ def test_bulletin_intro_duration_is_broadcast_length():
 
 def test_bulletin_segments_empty():
     assert bulletin_segments([]) == []
+
+
+def test_source_credit_lines_are_never_narrated():
+    from nr_news.shorts import bulletin_segments, narration_segments
+
+    story = _story("خبر", ["اصل نکتہ", "ماخذ: انڈ ٹوڈے، آج"])
+    pairs = bulletin_segments([story])
+    texts = [seg["text"] for _, seg in pairs]
+    assert any("اصل نکتہ" in t for t in texts)
+    assert not any(t.strip().startswith("ماخذ") for t in texts)
+
+    segs = narration_segments(story)
+    assert not any(s["text"].strip().startswith("ماخذ") for s in segs)
