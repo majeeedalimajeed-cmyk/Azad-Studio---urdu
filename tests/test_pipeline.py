@@ -487,6 +487,14 @@ def test_two_photo_card_layout_passes_visual_inspection(tmp_path):
     assert card.audit["heading_box"][2] - card.audit["heading_box"][0] < 720
 
 
+def test_pixabay_relax_query_shortens_specific_phrases():
+    relaxed = PixabayClient.relax_query("Telangana government education exam results")
+    assert relaxed[0] == "Telangana government education exam results"
+    assert "Telangana government education" in relaxed
+    assert relaxed[-1] == "Telangana government"
+    assert PixabayClient.relax_query("parliament session") == ["parliament session"]
+
+
 def test_pixabay_query_uses_relevant_story_terms():
     candidate = sample_candidate(
         original_headline="Hyderabad government election policy decision",

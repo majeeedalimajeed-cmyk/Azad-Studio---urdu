@@ -132,6 +132,29 @@ class PixabayClient:
             details=details,
         )
 
+    @staticmethod
+    def relax_query(query: str) -> list[str]:
+        """Candidate queries from most to least specific.
+
+        Pixabay matches every query term, so a long story-derived phrase often
+        returns zero hits. Retrying with the leading 3, then 2, terms keeps the
+        photo topical while avoiding an unrelated generic image.
+        """
+        words = query.split()
+        candidates = [query]
+        if len(words) > 3:
+            candidates.append(" ".join(words[:3]))
+        if len(words) > 2:
+            candidates.append(" ".join(words[:2]))
+        seen: set[str] = set()
+        out: list[str] = []
+        for cand in candidates:
+            key = cand.casefold()
+            if cand and key not in seen:
+                seen.add(key)
+                out.append(cand)
+        return out
+
     def search(self, query: str, *, per_page: int | None = None) -> list[dict[str, Any]]:
         if not self.available:
             self._log("held", "search", "Pixabay API key is not configured; text-led card used.",
@@ -142,6 +165,17 @@ class PixabayClient:
             self._log("held", "search", "Photo query is too short; no generic stock image used.",
                       query=query)
             return []
+        for attempt, relaxed in enumerate(self.relax_query(query)):
+            hits = self._search_once(relaxed, per_page=per_page)
+            if hits:
+                if attempt:
+                    self._log("ok", "search_relaxed",
+                              f"Pixabay query relaxed from {query!r} to {relaxed!r} for topical hits.",
+                              query=query, relaxed=relaxed, hits=len(hits))
+                return hits
+        return []
+
+    def _search_once(self, query: str, *, per_page: int | None = None) -> list[dict[str, Any]]:
         per_page = max(3, min(int(per_page or self.config.pixabay_per_page), 200))
         params: dict[str, Any] = {
             "key": self.config.pixabay_api_key,
