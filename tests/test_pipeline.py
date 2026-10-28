@@ -1096,3 +1096,48 @@ def test_llm_retries_on_429_then_succeeds(tmp_path, monkeypatch):
     assert out == {"ok": True}
     assert len(calls) == 3
     assert len(delays) == 2 and all(d > 0 for d in delays)
+
+
+def test_publish_gate_satisfied_by_standing_operator_approval(tmp_path):
+    # Regression: scheduled runs held every story with "An operator-approved
+    # test publication has not succeeded" because the flag lived only in the
+    # cached DB and no CI step ever performs a test=True publish. Standing
+    # operator approval (publish_safety_ok) + confirmed Page identity must
+    # satisfy the gate, and the successful publish must set the flag.
+    cfg = temp_config(tmp_path, dry_run=False, publish_enabled=True, publish_safety_switch=True,
+                      operator_approved=True, verify_approved=True, auto_post_enabled=True,
+                      facebook_page_token="fake-token", expected_page_name="AZAD STUDIO")
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    db.set_setting("facebook_identity_verified_at", iso())
+    db.set_setting("facebook_page_id", "123456789")
+    assert db.get_setting("facebook_test_post_passed") is None
+    candidate = sample_candidate(url="https://example.org/gate-story")
+    cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
+    content = {
+        "urdu_headline": "سرخی", "urdu_bullets": ["ایک", "دو", "تین"],
+        "roman_headline": "Headline", "roman_bullets": ["one", "two", "three"],
+        "verification_notes": [], "source_urls": [], "publication_time": iso(), "media": None,
+    }
+    eid, _ = db.insert_editorial(cid, None, content, status="approved")
+    card_id = db.insert_card(eid, str(tmp_path / "card.png"), "abc", 1080, 1350, 1, 1, "passed")
+    card = {"id": card_id, "file_path": str(tmp_path / "card.png"), "sha256": "abc",
+            "visual_status": "passed"}
+
+    class FakeGraph:
+        def confirmed_page_id(self):
+            return "123456789"
+
+        def publish_photo(self, *args, **kwargs):
+            return {"id": "photo1", "post_id": "123456789_999"}
+
+        def find_recent_caption(self, *args, **kwargs):
+            return None
+
+        def instagram_account_id(self, page_id):
+            return None
+
+    pipeline.publisher.graph = FakeGraph()
+    result = pipeline.publisher.publish(eid, card, dry_run=False)
+    assert result["status"] == "success"
+    assert db.get_setting("facebook_test_post_passed") == "true"
