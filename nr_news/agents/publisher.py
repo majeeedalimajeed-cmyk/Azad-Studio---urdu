@@ -40,16 +40,14 @@ class PublishingAgent:
         lines.append("Roman Urdu:")
         lines.append(editorial["roman_headline"])
         lines.extend(f"- {x}" for x in roman_bullets[:5])
-        if source_urls:
-            lines.append("")
-            lines.append("Sources:")
-            lines.extend(f"- {u}" for u in source_urls[:5])
+        # Operator rule: no URLs in the public caption. Source links and
+        # license references remain in the DB/audit trail only.
         # media_json may be a single dict (legacy) or a list of up to two
         # photos (current two-photo cards).
         media_items = media if isinstance(media, list) else ([media] if media else [])
         for item in media_items[:2]:
             if isinstance(item, dict) and item.get("credit"):
-                lines.append(f"Photo: {item['credit']} ({item.get('license_ref', 'licensed')})")
+                lines.append(f"Photo: {item['credit']}")
         lines.append(f"AZAD STUDIO ref: {marker}")
         return redact("\n".join(lines), self.config.secret_values)
 
