@@ -1034,3 +1034,65 @@ def test_text_led_card_has_operator_byline(tmp_path):
     assert cards[0].audit["visual_inspection"]["checks"]["narrow_latest_news_ribbon"] is True
     assert cards[0].audit["heading_box"][2] - cards[0].audit["heading_box"][0] < 720
     assert cards[0].audit["media_count"] == 0
+
+
+def test_publishing_token_derived_when_user_token_sits_in_page_slot(tmp_path):
+    # Regression: FB_PAGE_ACCESS_TOKEN held a long-lived *user* token, so
+    # verify passed on user permissions but POST /{page}/photos failed with
+    # Graph (#200) "publish_actions are not available". Publishing must
+    # derive the real Page token via /me/accounts and use that instead.
+    cfg = temp_config(tmp_path, expected_page_name="Azad Studio", facebook_page_id="123456789",
+                      facebook_user_token="expired-user", facebook_page_token="user-token-xyz")
+    db = Database(cfg.db_path)
+    seen = {}
+
+    class FakeGraph(FacebookGraphClient):
+        def _call(self, method, path, *, token, params=None, data=None, files=None):
+            if path == "/me" and token == "user-token-xyz":
+                return {"id": "999888777"}  # the user, not the Page
+            if path == "/me/accounts" and token == "user-token-xyz":
+                return {"data": [{"id": "123456789", "access_token": "real-page-token"}]}
+            if path == "/123456789/photos":
+                seen["token"] = token
+                assert token == "real-page-token", f"publish used {token!r}, not the Page token"
+                return {"id": "photo1", "post_id": "123456789_555"}
+            return {}
+
+    card = tmp_path / "card.png"
+    card.write_bytes(b"\x89PNG fake")
+    result = FakeGraph(db, cfg).publish_photo("123456789", str(card), "caption")
+    assert result["post_id"] == "123456789_555"
+    assert seen["token"] == "real-page-token"
+
+
+def test_llm_retries_on_429_then_succeeds(tmp_path, monkeypatch):
+    from nr_news import llm as llm_mod
+
+    cfg = temp_config(tmp_path, llm_api_key="test-key", llm_model="openai/gpt-oss-120b",
+                      llm_api_base="https://api.groq.com/openai/v1")
+    calls = []
+    delays = []
+
+    class Resp:
+        def __init__(self, status, payload):
+            self.status_code = status
+            self._payload = payload
+            self.text = str(payload)
+            self.headers = {}
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        if len(calls) < 3:
+            return Resp(429, {"error": {"message": "Rate limit reached, try again in 1s"}})
+        return Resp(200, {"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+    monkeypatch.setattr(llm_mod.requests, "post", fake_post)
+    client = llm_mod.LLMClient(cfg)
+    client._sleep = lambda seconds: delays.append(seconds)
+    out = client.chat_json(system="s", user={"x": 1})
+    assert out == {"ok": True}
+    assert len(calls) == 3
+    assert len(delays) == 2 and all(d > 0 for d in delays)

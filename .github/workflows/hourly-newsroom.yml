@@ -78,8 +78,8 @@ jobs:
 
       - name: Hourly source scan and verification jobs
         run: |
-          python -m nr_news.cli scan --mode hourly --drain-limit 100
-          python -m nr_news.cli worker --limit 100
+          python -m nr_news.cli scan --mode hourly --drain-limit 20
+          python -m nr_news.cli worker --limit 20
 
       - name: YouTube Shorts cycle (breaking + 09:00/19:00 IST best-news batches)
         run: python -m nr_news.cli shorts-cycle

@@ -37,6 +37,8 @@ class FacebookGraphClient:
     def __init__(self, db: Database | None = None, config=CONFIG):
         self.db = db or Database(config.db_path)
         self.config = config
+        # In-memory only: derived Page tokens are never persisted.
+        self._publishing_token_cache: dict[str, str] = {}
 
     @property
     def base(self) -> str:
@@ -230,7 +232,18 @@ class FacebookGraphClient:
                 reason = "Page token reports missing required permissions: " + ", ".join(missing_permissions)
                 self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
                 return {"ok": False, "reason": reason}
-        if not tasks and not granted and not me_is_page:
+        # A user token stored in the Page-token slot reports granted *user*
+        # permissions while /me resolves to the user, not the Page. That
+        # combination previously verified OK and then failed at publish
+        # time with Graph (#200) publish_actions. Permissions alone are
+        # therefore not proof: require Page tasks, /me == Page, or a real
+        # Page token derived via /me/accounts.
+        publishing_ok = False
+        try:
+            publishing_ok = bool(self.publishing_token(str(page_id)))
+        except GraphAPIError:
+            publishing_ok = False
+        if not tasks and not me_is_page and not publishing_ok:
             reason = "Page token did not return the required tasks or permissions."
             self.db.insert_api_event("facebook", "verify_page_token_fallback", "held", reason)
             return {"ok": False, "reason": reason}
@@ -252,6 +265,83 @@ class FacebookGraphClient:
                 "permissions": sorted(granted), "tasks": sorted(tasks),
                 "identity_method": "page_token_fallback"}
 
+
+    # --- Page-token derivation -------------------------------------------
+    def _configured_tokens(self) -> list[str]:
+        tokens: list[str] = []
+        for token in (self.config.facebook_page_token, self.config.facebook_user_token):
+            if token and token not in tokens:
+                tokens.append(token)
+        return tokens
+
+    def publishing_token(self, page_id: str) -> str:
+        """Return a token that IS the Page, deriving it when necessary.
+
+        The operator may have stored a long-lived *user* token in the Page
+        token slot. Posting with a user token fails with Graph (#200)
+        "publish_actions are not available", so resolve the real Page token
+        via /me/accounts (or the Page's own access_token field) and cache it
+        in memory for this process.
+        """
+        page_id = str(page_id)
+        if self._publishing_token_cache.get(page_id):
+            return self._publishing_token_cache[page_id]
+        last_error: GraphAPIError | None = None
+        # 1) A configured token that resolves /me to the Page is a Page token.
+        for token in self._configured_tokens():
+            try:
+                me = self._call("GET", "/me", token=token, params={"fields": "id"})
+            except GraphAPIError as exc:
+                last_error = exc
+                continue
+            if str(me.get("id") or "") == page_id:
+                self._publishing_token_cache[page_id] = token
+                return token
+        # 2) A user token can mint the Page token via /me/accounts.
+        for token in self._configured_tokens():
+            try:
+                accounts = self._call("GET", "/me/accounts", token=token,
+                                      params={"fields": "id,access_token", "limit": 100})
+            except GraphAPIError as exc:
+                last_error = exc
+                continue
+            for page in accounts.get("data", []) or []:
+                if str(page.get("id") or "") == page_id and page.get("access_token"):
+                    derived = str(page["access_token"])
+                    self._publishing_token_cache[page_id] = derived
+                    self.db.insert_api_event(
+                        "facebook", "publishing_token_derived", "ok",
+                        "Derived the real Page access token from a user token via /me/accounts.",
+                        details={"page_id": page_id})
+                    return derived
+        # 3) Direct access_token field on the Page object (user token read).
+        for token in self._configured_tokens():
+            try:
+                page = self._call("GET", f"/{page_id}", token=token,
+                                  params={"fields": "id,access_token"})
+            except GraphAPIError as exc:
+                last_error = exc
+                continue
+            if str(page.get("id") or "") == page_id and page.get("access_token"):
+                derived = str(page["access_token"])
+                self._publishing_token_cache[page_id] = derived
+                self.db.insert_api_event(
+                    "facebook", "publishing_token_derived", "ok",
+                    "Derived the real Page access token from the Page object.",
+                    details={"page_id": page_id})
+                return derived
+        detail = redact(str(last_error) if last_error else "no configured token",
+                        self.config.secret_values)
+        raise GraphAPIError(
+            f"Could not obtain a Page access token for Page {page_id}: {detail}",
+            code="NO_PAGE_TOKEN")
+
+    def _default_publishing_token(self) -> str:
+        page_id = self.config.facebook_page_id or self.db.get_setting("facebook_page_id")
+        if page_id:
+            return self.publishing_token(str(page_id))
+        return self.config.facebook_page_token or ""
+
     def confirmed_page_id(self) -> str | None:
         if self.db.get_setting("facebook_identity_verified_at"):
             return self.db.get_setting("facebook_page_id")
@@ -265,7 +355,7 @@ class FacebookGraphClient:
             raise GraphAPIError("Card image exceeds the 10 MB photo upload limit")
         with path.open("rb") as fh:
             payload = self._call(
-                "POST", f"/{page_id}/photos", token=self.config.facebook_page_token or "",
+                "POST", f"/{page_id}/photos", token=self.publishing_token(page_id),
                 data={"caption": caption, "published": "true"},
                 files={"source": (path.name, fh, "image/png")},
             )
@@ -280,6 +370,11 @@ class FacebookGraphClient:
         # as a confirmed duplicate.
         tokens = [t for t in (self.config.facebook_user_token,
                               self.config.facebook_page_token) if t]
+        try:
+            derived = self.publishing_token(page_id)
+            tokens = [derived] + [t for t in tokens if t != derived]
+        except GraphAPIError:
+            pass
         last_error: GraphAPIError | None = None
         for token in tokens:
             try:
@@ -306,7 +401,7 @@ class FacebookGraphClient:
     # --- Instagram cross-posting (linked Instagram professional account) ---
     def instagram_account_id(self, page_id: str) -> str | None:
         payload = self._call(
-            "GET", f"/{page_id}", token=self.config.facebook_page_token or "",
+            "GET", f"/{page_id}", token=self.publishing_token(page_id),
             params={"fields": "instagram_business_account{id,username}"},
         )
         account = payload.get("instagram_business_account") or {}
@@ -315,7 +410,7 @@ class FacebookGraphClient:
     def post_image_url(self, post_id: str) -> str | None:
         payload = self._call(
             "GET", f"/{post_id}/attachments",
-            token=self.config.facebook_page_token or "",
+            token=self._default_publishing_token(),
         )
         for item in payload.get("data", []):
             src = ((item.get("media") or {}).get("image") or {}).get("src")
@@ -326,7 +421,7 @@ class FacebookGraphClient:
     def ig_create_container(self, ig_user_id: str, image_url: str, caption: str) -> str:
         payload = self._call(
             "POST", f"/{ig_user_id}/media",
-            token=self.config.facebook_page_token or "",
+            token=self._default_publishing_token(),
             data={"image_url": image_url, "caption": caption},
         )
         if not payload.get("id"):
@@ -335,7 +430,7 @@ class FacebookGraphClient:
 
     def ig_container_status(self, creation_id: str) -> str:
         payload = self._call(
-            "GET", f"/{creation_id}", token=self.config.facebook_page_token or "",
+            "GET", f"/{creation_id}", token=self._default_publishing_token(),
             params={"fields": "status_code"},
         )
         return str(payload.get("status_code") or "")
@@ -343,7 +438,7 @@ class FacebookGraphClient:
     def ig_publish_container(self, ig_user_id: str, creation_id: str) -> str:
         payload = self._call(
             "POST", f"/{ig_user_id}/media_publish",
-            token=self.config.facebook_page_token or "",
+            token=self._default_publishing_token(),
             data={"creation_id": creation_id},
         )
         if not payload.get("id"):
@@ -352,7 +447,7 @@ class FacebookGraphClient:
 
     def ig_permalink(self, media_id: str) -> str | None:
         payload = self._call(
-            "GET", f"/{media_id}", token=self.config.facebook_page_token or "",
+            "GET", f"/{media_id}", token=self._default_publishing_token(),
             params={"fields": "permalink"},
         )
         return str(payload["permalink"]) if payload.get("permalink") else None
@@ -361,6 +456,13 @@ class FacebookGraphClient:
         """Independently confirm a published post through the Graph API."""
         tokens = [t for t in (self.config.facebook_page_token,
                               self.config.facebook_user_token) if t]
+        prefix = str(post_id).split("_", 1)[0]
+        if prefix:
+            try:
+                derived = self.publishing_token(prefix)
+                tokens = [derived] + [t for t in tokens if t != derived]
+            except GraphAPIError:
+                pass
         last_error: GraphAPIError | None = None
         for token in tokens:
             try:

@@ -138,6 +138,12 @@ class Config:
                                    or ("grok-4.6" if os.getenv("GROK_API_KEY") or os.getenv("GROK_API_KEY_FILE") else None))
     llm_api_key: str | None = field(default_factory=lambda: _first_secret(
         "NR_LLM_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY"))
+    # Groq's free tier allows only ~8k tokens/min for gpt-oss-120b, and an
+    # editorial story needs several model calls — retry 429/5xx with backoff
+    # (honouring the provider's retry hint) instead of holding the story.
+    llm_max_retries: int = int(os.getenv("NR_LLM_MAX_RETRIES", "4"))
+    llm_retry_base_seconds: float = float(os.getenv("NR_LLM_RETRY_BASE_SECONDS", "2"))
+    llm_retry_max_seconds: float = float(os.getenv("NR_LLM_RETRY_MAX_SECONDS", "45"))
 
     # Facebook secrets are loaded into memory only, never persisted.
     facebook_user_token: str | None = field(default_factory=lambda: _first_secret(
