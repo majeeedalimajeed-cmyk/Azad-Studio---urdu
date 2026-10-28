@@ -130,7 +130,8 @@ def main() -> None:
     (out_dir / "bulletin_meta.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: result[k] for k in
-                      ("video_path", "duration_seconds", "voice", "rate", "pitch", "story_count")},
+                      ("video_path", "duration_seconds", "voice", "rate", "pitch",
+                       "story_count", "format", "width", "height")},
                      ensure_ascii=False, indent=2))
 
 

@@ -43,3 +43,32 @@ def test_source_credit_lines_are_never_narrated():
 
     segs = narration_segments(story)
     assert not any(s["text"].strip().startswith("ماخذ") for s in segs)
+
+
+def test_video_format_rule_over_90s_is_landscape():
+    from nr_news.shorts import slide_size_for_duration, video_format_for_duration
+
+    assert video_format_for_duration(30) == "portrait"
+    assert video_format_for_duration(90) == "portrait"
+    assert video_format_for_duration(91) == "landscape"
+    assert slide_size_for_duration(45) == (1080, 1920)
+    assert slide_size_for_duration(166) == (1920, 1080)
+
+
+def test_landscape_slide_is_1920x1080(tmp_path):
+    from PIL import Image
+
+    from nr_news.shorts import render_slide_landscape
+
+    story = _story("سرخی", ["نکتہ"])
+    for seg in ({"kind": "headline", "text": story.urdu_headline, "story_index": 1, "story_total": 2},
+                {"kind": "bullet", "text": "نکتہ", "index": 1, "total": 1, "story_index": 1}):
+        out = render_slide_landscape(story, seg, tmp_path / f"{seg['kind']}.png")
+        assert Image.open(out).size == (1920, 1080)
+
+
+def test_background_music_bed_is_generated(tmp_path):
+    from nr_news.shorts import synthesize_background_music
+
+    out = synthesize_background_music(tmp_path / "bed.mp3", 3.0)
+    assert out.exists() and out.stat().st_size > 1000

@@ -136,6 +136,20 @@ def _run_ffmpeg(cmd: list[str], config=CONFIG) -> subprocess.CompletedProcess:
 
 
 SLIDE_W, SLIDE_H = 1080, 1920
+LANDSCAPE_W, LANDSCAPE_H = 1920, 1080
+# Operator format rule (28 Oct 2026): videos longer than 90 seconds are
+# landscape 16:9 (standard YouTube player frame); shorter ones stay
+# portrait 9:16 for Shorts.
+LONG_VIDEO_THRESHOLD_SECONDS = 90.0
+
+
+def video_format_for_duration(seconds: float) -> str:
+    """'landscape' for long videos (>90s), else 'portrait'."""
+    return "landscape" if float(seconds) > LONG_VIDEO_THRESHOLD_SECONDS else "portrait"
+
+
+def slide_size_for_duration(seconds: float) -> tuple[int, int]:
+    return (LANDSCAPE_W, LANDSCAPE_H) if video_format_for_duration(seconds) == "landscape" else (SLIDE_W, SLIDE_H)
 # Broadcast pacing: slide changes land on the anchor's segment boundaries
 # (per-segment TTS timestamps) with a natural newsreader pause between
 # sentences and headlines — clarity over speed.
@@ -317,6 +331,129 @@ def render_slide(content: EditorialContent, segment: dict[str, Any],
     return out_path
 
 
+def render_slide_landscape(content: EditorialContent, segment: dict[str, Any],
+                           out_path: Path, *, config=CONFIG) -> Path:
+    """Render one 1920x1080 (16:9) broadcast slide for long videos.
+
+    Same premium navy/gold AZAD STUDIO look as the portrait slides,
+    composed wide like a TV news channel: slim brand bar, the story
+    photo in a large panel on the left, Urdu headline/bullet text on
+    the right, and the ticker furniture along the bottom.
+    """
+    from PIL import Image, ImageDraw, ImageOps
+
+    from .renderer import (CardRenderer, gradient, isolate_latin, load_logo,
+                           normalize_media, proportional_logo)
+
+    W, H = LANDSCAPE_W, LANDSCAPE_H
+    renderer = CardRenderer(config)
+    logo = load_logo()
+    im = gradient((W, H), (8, 13, 28), (3, 4, 8))
+    d = ImageDraw.Draw(im, "RGBA")
+
+    def rtl(text, size, *, weight="Bold", fill=(248, 247, 242), xy=(0, 0),
+            anchor="ra", max_width=900, max_lines=5, line_factor=1.6):
+        fnt = renderer._font(True, size, weight)
+        lines = renderer.wrap(d, text, fnt, max_width, True)
+        while len(lines) > max_lines and size > 24:
+            size -= 2
+            fnt = renderer._font(True, size, weight)
+            lines = renderer.wrap(d, text, fnt, max_width, True)
+        lh = size * line_factor
+        for i, line in enumerate(lines):
+            d.text((xy[0], xy[1] + i * lh), isolate_latin(line), font=fnt, fill=fill,
+                   anchor=anchor, direction="rtl", language="ur")
+        return lines, fnt, lh
+
+    # --- Brand bar -------------------------------------------------------
+    d.rectangle((0, 0, W, 84), fill=(6, 8, 16))
+    d.rectangle((0, 84, W, 88), fill=(226, 184, 74))
+    scaled = proportional_logo(logo, 60)
+    im.paste(scaled, (36, 12), scaled)
+    brand_f = renderer._font(False, 34, "Bold")
+    d.text((36 + scaled.width + 18, 42), "AZAD STUDIO", font=brand_f,
+           fill=(255, 231, 151), anchor="lm")
+    d.rounded_rectangle((W - 262, 18, W - 40, 66), radius=24, fill=(190, 24, 35))
+    latest_f = renderer._font(False, 26, "Bold")
+    d.text((W - 151, 42), "LATEST", font=latest_f, fill=(255, 255, 255), anchor="mm")
+
+    # --- Photo panel (left) ----------------------------------------------
+    PX, PY, PW, PH = 56, 128, 800, 640
+
+    def photo_panel() -> None:
+        used = False
+        for item in normalize_media(content.media, 2):
+            lp = item.get("local_path")
+            if lp and Path(lp).exists():
+                try:
+                    with Image.open(lp) as src:
+                        fitted = ImageOps.fit(src.convert("RGB"), (PW, PH))
+                    im.paste(fitted, (PX, PY))
+                    used = True
+                    break
+                except Exception:
+                    continue
+        if not used:
+            d.rectangle((PX, PY, PX + PW, PY + PH), fill=(10, 15, 28))
+            try:
+                wm = proportional_logo(logo, 300)
+                if wm.mode != "RGBA":
+                    wm = wm.convert("RGBA")
+                wm.putalpha(wm.split()[3].point(lambda a: int(a * 0.15)))
+                im.paste(wm, (PX + PW - wm.width - 24, PY + 170), wm)
+            except Exception:
+                pass
+        d.rectangle((PX, PY + PH, PX + PW, PY + PH + 4), fill=(226, 184, 74))
+        # Story counter chip under the photo (e.g. خبر 3 / 7 in Latin digits).
+        idx = int(segment.get("story_index") or 0)
+        total = int(segment.get("story_total") or 0)
+        if idx and total:
+            chip_f = renderer._font(False, 26, "SemiBold")
+            d.text((PX + PW, PY + PH + 38), f"{idx} / {total}", font=chip_f,
+                   fill=(148, 158, 182), anchor="ra")
+
+    TX = W - 56  # right edge of the RTL text zone
+    kind = segment["kind"]
+    if kind in ("headline", "bullet", "breaking"):
+        photo_panel()
+    if kind == "headline":
+        d.rectangle((TX - 12, 148, TX, 182), fill=(190, 24, 35))
+        rtl(TODAYS_NEWS_URDU, 30, fill=(226, 184, 74), xy=(TX - 34, 146),
+            anchor="ra", max_lines=1)
+        rtl(segment["text"], 60, xy=(TX, 230), max_width=920, max_lines=6)
+    elif kind == "bullet":
+        rtl(content.urdu_headline, 36, fill=(228, 232, 242), xy=(TX, 140),
+            max_width=920, max_lines=3)
+        d.rectangle((TX - 14, 330, TX, 800), fill=(226, 184, 74))
+        rtl(segment["text"], 50, xy=(TX - 48, 340), max_width=880, max_lines=7)
+        total = int(segment.get("total") or 1)
+        idx = int(segment.get("index") or 1)
+        if total > 1:
+            dots_w = total * 40 - 20
+            x0 = TX - 880 + (880 - dots_w) // 2
+            for i in range(1, total + 1):
+                cx = x0 + (i - 1) * 40 + 10
+                rr = 10 if i == idx else 7
+                d.ellipse((cx - rr, 856 - rr, cx + rr, 856 + rr),
+                          fill=(226, 184, 74) if i == idx else (74, 82, 104))
+    elif kind == "breaking":
+        rtl(segment["text"], 56, fill=(255, 255, 255), xy=(TX, 240),
+            max_width=920, max_lines=3)
+        rtl(content.urdu_headline, 40, fill=(226, 214, 180), xy=(TX, 470),
+            max_width=920, max_lines=3)
+    else:  # welcome / intro / latest / credits: centred, no photo panel
+        rtl(segment["text"], 58, fill=(255, 231, 151), xy=(W // 2, 470),
+            anchor="mm", max_width=1500, max_lines=4)
+
+    # --- Ticker furniture (strip + label are overlaid at build) ----------
+    d.rectangle((0, H - 130, W, H), fill=(2, 2, 4))
+    d.rectangle((0, H - 130, W, H - 126), fill=(226, 184, 74))
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    im.save(out_path)
+    return out_path
+
+
 def build_short(content: EditorialContent, out_dir: Path,
                 *, config=CONFIG, full_details: bool = False) -> dict[str, Any]:
     """Build a broadcast-style Short synced segment-by-segment to the TTS.
@@ -412,17 +549,22 @@ def build_short(content: EditorialContent, out_dir: Path,
                       "starts_at": round(elapsed, 2)})
         elapsed += clip_seconds
 
-    # Concatenate segment clips into the final Short.
+    # Concatenate segment clips, then lay the soft news bed low under
+    # the anchor for the whole Short (news-channel style).
     list_file = seg_dir / "clips.txt"
     list_file.write_text("".join(f"file '{p.resolve()}'\n" for p in clip_paths),
                          encoding="utf-8")
     video_path = out_dir / "short.mp4"
+    raw_path = seg_dir / "short_raw.mp4"
     proc = _run_ffmpeg([
         ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
-        "-c", "copy", "-movflags", "+faststart", str(video_path)], config)
-    if proc.returncode != 0 or not video_path.exists():
+        "-c", "copy", "-movflags", "+faststart", str(raw_path)], config)
+    if proc.returncode != 0 or not raw_path.exists():
         raise ShortUnavailable(
             "ffmpeg concat failed: " + redact(proc.stderr[-500:], config.secret_values))
+    mixed = mix_background_music(raw_path, video_path, elapsed, seg_dir, config=config)
+    if mixed != video_path:
+        mixed.replace(video_path)
 
     # Combined narration track for audit (best effort).
     combined = out_dir / "voiceover_urdu.mp3"
@@ -451,6 +593,10 @@ def build_short(content: EditorialContent, out_dir: Path,
         "duration_seconds": round(elapsed, 2),
         "script": script,
         "voice": config.tts_voice,
+        "format": "portrait",
+        "width": SLIDE_W,
+        "height": SLIDE_H,
+        "music_bed": "soft news bed, low throughout",
         "segments": timed,
     }
 
@@ -540,7 +686,68 @@ def synthesize_intro_music(out_path: Path, seconds: float = INTRO_SECONDS,
     return out_path
 
 
-def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
+def synthesize_background_music(out_path: Path, seconds: float,
+                                *, config=CONFIG) -> Path:
+    """Soft, steady news bed played low under the anchor throughout.
+
+    The bed TV news channels run under speech: a warm D-minor-add9 pad
+    through a low-pass, with a very slow, gentle pulse — no drums, no
+    melody, no vocals. Mixed quietly at build time so the voice always
+    stays clearly on top; smooth fade-in and a fade-out at the end.
+    """
+    seconds = max(1.0, float(seconds))
+    dur = f"{seconds:.2f}"
+    inputs: list[str] = []
+    for freq in ("73.42", "146.83", "174.61", "220.00", "329.63"):
+        inputs += ["-f", "lavfi", "-i", f"sine=frequency={freq}:duration={dur}"]
+    fc = (
+        "[0:a]volume=0.20[p0];[1:a]volume=0.16[p1];[2:a]volume=0.11[p2];"
+        "[3:a]volume=0.12[p3];[4:a]volume=0.05[p4];"
+        "[p0][p1][p2][p3][p4]amix=inputs=5:duration=longest:normalize=0,"
+        "lowpass=f=900,tremolo=f=0.08:d=0.10,volume=0.55,"
+        f"afade=t=in:st=0:d=1.2,afade=t=out:st={max(0.0, seconds - 2.5):.2f}:d=2.5,"
+        f"atrim=0:{dur}[a]"
+    )
+    proc = _run_ffmpeg([ffmpeg_exe(), "-y", *inputs, "-filter_complex", fc,
+                        "-map", "[a]", "-c:a", "libmp3lame", "-q:a", "4",
+                        str(out_path)], config)
+    if proc.returncode != 0 or not out_path.exists():
+        proc = _run_ffmpeg([ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                            "anullsrc=r=44100:cl=stereo", "-t", dur,
+                            "-c:a", "libmp3lame", "-q:a", "4", str(out_path)], config)
+    if proc.returncode != 0 or not out_path.exists():
+        raise ShortUnavailable("Background music generation failed")
+    return out_path
+
+
+def mix_background_music(video_in: Path, video_out: Path, seconds: float,
+                         seg_dir: Path, *, config=CONFIG,
+                         bed_volume: float = 0.14) -> Path:
+    """Mix the soft news bed low under a finished video's audio.
+
+    Falls back to the unmixed video if anything fails — music must
+    never break a build.
+    """
+    try:
+        bed = synthesize_background_music(seg_dir / "music_bed.mp3", seconds,
+                                          config=config)
+        fc = (f"[0:a]volume=1.0[voice];[1:a]volume={bed_volume:.3f}[bed];"
+              "[voice][bed]amix=inputs=2:duration=first:dropout_transition=0:"
+              "normalize=0[a]")
+        proc = _run_ffmpeg([
+            ffmpeg_exe(), "-y", "-i", str(video_in), "-i", str(bed),
+            "-filter_complex", fc, "-map", "0:v", "-map", "[a]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+            "-ac", "2", "-movflags", "+faststart", str(video_out)], config)
+        if proc.returncode == 0 and video_out.exists():
+            return video_out
+    except Exception:
+        pass
+    return video_in
+
+
+def build_intro_clip(out_dir: Path, *, config=CONFIG,
+                     size: tuple[int, int] = (SLIDE_W, SLIDE_H)) -> Path:
     """Premium 3-5s channel intro: gold logo, golden light sweep, Urdu reveal.
 
     Dark navy-black backdrop, the existing gold AZAD STUDIO monogram fades
@@ -556,7 +763,14 @@ def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     renderer = CardRenderer(config)
     logo = load_logo()
-    base = gradient((SLIDE_W, SLIDE_H), (6, 9, 18), (2, 3, 7))
+    W, H = size
+    portrait = H >= W
+    logo_cy = 560 if portrait else int(H * 0.37)
+    logo_size = 320 if portrait else 300
+    div_y = 1006 if portrait else int(H * 0.575)
+    welcome_cy = 1130 if portrait else int(H * 0.665)
+    today_cy = 1265 if portrait else int(H * 0.765)
+    base = gradient((W, H), (6, 9, 18), (2, 3, 7))
 
     frames_dir = out_dir / "intro_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
@@ -564,12 +778,12 @@ def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
 
     def text_layer(text: str, size: int, fill: tuple[int, int, int],
                    cy: int, alpha: float) -> Image.Image:
-        layer = Image.new("RGBA", (SLIDE_W, SLIDE_H), (0, 0, 0, 0))
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         if alpha <= 0:
             return layer
         ld = ImageDraw.Draw(layer)
         fnt = renderer._font(True, size, "Bold")
-        ld.text((SLIDE_W // 2, cy), isolate_latin(text), font=fnt,
+        ld.text((W // 2, cy), isolate_latin(text), font=fnt,
                 fill=fill + (255,), anchor="mm", direction="rtl", language="ur")
         if alpha < 1.0:
             layer.putalpha(layer.split()[3].point(lambda a: int(a * alpha)))
@@ -581,18 +795,18 @@ def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
         d = ImageDraw.Draw(im, "RGBA")
 
         # Top brand line (static, refined broadcast furniture).
-        d.rectangle((0, 0, SLIDE_W, 4), fill=(226, 184, 74, 255))
+        d.rectangle((0, 0, W, 4), fill=(226, 184, 74, 255))
 
         # Logo: gentle fade + settle (scale 0.94 -> 1.00), centre screen.
         appear = _fade(t, 0.15, 1.15)
         if appear > 0:
-            size = int(320 * (0.94 + 0.06 * appear))
+            size = int(logo_size * (0.94 + 0.06 * appear))
             mark = proportional_logo(logo, size)
             if mark.mode != "RGBA":
                 mark = mark.convert("RGBA")
             if appear < 1.0:
                 mark.putalpha(mark.split()[3].point(lambda a: int(a * appear)))
-            im.paste(mark, ((SLIDE_W - mark.width) // 2, 560 - mark.height // 2), mark)
+            im.paste(mark, ((W - mark.width) // 2, logo_cy - mark.height // 2), mark)
             d = ImageDraw.Draw(im, "RGBA")
 
         # Subtle golden light sweep across the frame (1.0s -> 2.1s): a
@@ -600,12 +814,12 @@ def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
         # own layer and alpha-composited so it stays genuinely translucent.
         sweep = _fade(t, 1.0, 2.1)
         if 0.0 < sweep < 1.0:
-            x = -260 + sweep * (SLIDE_W + 520)
+            x = -260 + sweep * (W + 520)
             glow = int(34 * (1.0 - abs(sweep - 0.5) * 2) + 4)
-            sheen = Image.new("RGBA", (SLIDE_W, SLIDE_H), (0, 0, 0, 0))
+            sheen = Image.new("RGBA", (W, H), (0, 0, 0, 0))
             sd = ImageDraw.Draw(sheen)
-            sd.polygon([(x, -80), (x + 170, -80), (x + 40, SLIDE_H + 80),
-                        (x - 130, SLIDE_H + 80)], fill=(255, 214, 120, 255))
+            sd.polygon([(x, -80), (x + 170, -80), (x + 40, H + 80),
+                        (x - 130, H + 80)], fill=(255, 214, 120, 255))
             sheen.putalpha(sheen.split()[3].point(lambda a: int(a * glow / 255)))
             im = Image.alpha_composite(im, sheen)
             d = ImageDraw.Draw(im, "RGBA")
@@ -614,18 +828,18 @@ def build_intro_clip(out_dir: Path, *, config=CONFIG) -> Path:
         grow = _fade(t, 1.9, 2.6)
         if grow > 0:
             half = int(210 * grow)
-            d.rectangle((SLIDE_W // 2 - half, 1006, SLIDE_W // 2 + half, 1012),
+            d.rectangle((W // 2 - half, div_y, W // 2 + half, div_y + 6),
                         fill=(226, 184, 74, 255))
 
         # Urdu reveal: welcome first, then today's-news line.
         im = Image.alpha_composite(im, text_layer(
-            WELCOME_URDU, 66, (255, 231, 151), 1130, _fade(t, 1.35, 2.15)))
+            WELCOME_URDU, 66, (255, 231, 151), welcome_cy, _fade(t, 1.35, 2.15)))
         im = Image.alpha_composite(im, text_layer(
-            TODAYS_NEWS_URDU, 48, (248, 247, 242), 1265, _fade(t, 2.35, 3.15)))
+            TODAYS_NEWS_URDU, 48, (248, 247, 242), today_cy, _fade(t, 2.35, 3.15)))
 
         # Cinematic close: ease to black for a seamless cut to the anchor.
         if t > INTRO_SECONDS - 0.35:
-            black = Image.new("RGBA", (SLIDE_W, SLIDE_H), (0, 0, 0, 255))
+            black = Image.new("RGBA", (W, H), (0, 0, 0, 255))
             black.putalpha(int(255 * (t - (INTRO_SECONDS - 0.35)) / 0.35))
             im = Image.alpha_composite(im, black)
 
@@ -650,10 +864,12 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
                    *, config=CONFIG, closing_credit: str = "") -> dict[str, Any]:
     """Build one premium bulletin video: ranked stories, one at a time.
 
-    Reuses the broadcast slide engine and the upgraded newsreader voice
-    (slower rate, broadcast pitch/volume, natural inter-segment pauses).
-    Each story keeps its own headline context on screen while its bullets
-    play; a scrolling AZAD STUDIO ticker runs along the bottom.
+    Format follows the operator rule: a bulletin longer than 90 seconds
+    is landscape 1920x1080 (16:9, the standard YouTube player frame);
+    a short one stays portrait 1080x1920 (9:16). Each story keeps its
+    own headline context on screen while its bullets play, a scrolling
+    Urdu headlines ticker runs along the bottom, and a soft news bed
+    plays low under the anchor throughout, news-channel style.
     """
     if not stories:
         raise ShortUnavailable("Bulletin needs at least one story")
@@ -699,9 +915,31 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
     label_path = seg_dir / "ticker_label.png"
     label.save(label_path)
 
-    # Premium channel intro (animated logo + soft music) opens the bulletin;
-    # the anchor's first headline follows as the music fades out.
-    intro_clip = build_intro_clip(seg_dir, config=config)
+    # First pass: synthesise every narration segment so the total
+    # duration is known before choosing the frame (operator rule:
+    # >90s landscape 16:9, otherwise portrait 9:16).
+    prepared: list[dict[str, Any]] = []
+    total_seconds = INTRO_SECONDS
+    for i, (story, seg) in enumerate(pairs):
+        if seg["kind"] == "intro":
+            continue  # covered by the animated intro clip below
+        audio = synthesize_tts(seg["text"] + "۔", config.tts_voice, config.tts_rate,
+                               seg_dir / f"seg_{i:02d}.mp3",
+                               pitch=getattr(config, "tts_pitch", "-2Hz"),
+                               volume=getattr(config, "tts_volume", "+0%"))
+        seg_seconds = audio_duration(audio)
+        total_seconds += seg_seconds + SEGMENT_GAP_SECONDS
+        prepared.append({"index": i, "story": story, "seg": seg,
+                         "audio": audio, "seconds": seg_seconds})
+    fmt = video_format_for_duration(total_seconds)
+    W, H = slide_size_for_duration(total_seconds)
+    landscape = fmt == "landscape"
+    label_y = (H - 128) if landscape else 1690
+    strip_y = (H - 97) if landscape else 1721
+
+    # Premium channel intro (animated logo + soft music) opens the
+    # bulletin in the chosen frame; the anchor follows as it fades.
+    intro_clip = build_intro_clip(seg_dir, config=config, size=(W, H))
     clip_paths: list[Path] = [intro_clip]
     audio_parts: list[Path] = []
     timed: list[dict[str, Any]] = [
@@ -709,25 +947,22 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
          "seconds": INTRO_SECONDS, "starts_at": 0.0},
     ]
     elapsed = INTRO_SECONDS
-    for i, (story, seg) in enumerate(pairs):
-        if seg["kind"] == "intro":
-            continue  # covered by the animated intro clip above
-        audio = synthesize_tts(seg["text"] + "۔", config.tts_voice, config.tts_rate,
-                               seg_dir / f"seg_{i:02d}.mp3",
-                               pitch=getattr(config, "tts_pitch", "-2Hz"),
-                               volume=getattr(config, "tts_volume", "+0%"))
-        seg_seconds = audio_duration(audio)
+    for item in prepared:
+        i, story, seg = item["index"], item["story"], item["seg"]
+        audio, seg_seconds = item["audio"], item["seconds"]
         clip_seconds = seg_seconds + SEGMENT_GAP_SECONDS
-        slide = render_slide(story, seg, seg_dir / f"slide_{i:02d}.png", config=config)
+        if landscape:
+            slide = render_slide_landscape(story, seg, seg_dir / f"slide_{i:02d}.png",
+                                           config=config)
+        else:
+            slide = render_slide(story, seg, seg_dir / f"slide_{i:02d}.png", config=config)
         clip = seg_dir / f"clip_{i:02d}.mp4"
-        fade_out = max(0.0, clip_seconds - 0.15)
         fc_full = (
-            f"[0:v][1:v]overlay=x='1080-mod((t+{elapsed:.2f})*130\\,{1080 + strip_w})'"
-            ":y=1721[t1];[t1][2:v]overlay=0:1690[t2];"
-            f"[t2]"
-            "format=yuv420p[v]"
+            f"[0:v][1:v]overlay=x='{W}-mod((t+{elapsed:.2f})*130\\,{W + strip_w})'"
+            f":y={strip_y}[t1];[t1][2:v]overlay=0:{label_y}[t2];"
+            "[t2]format=yuv420p[v]"
         )
-        vf_plain = "scale=1080:1920,format=yuv420p"  # hard cuts only: fades read as blinking
+        vf_plain = f"scale={W}:{H},format=yuv420p"  # hard cuts only: fades blink
         attempts = [
             [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide),
              "-loop", "1", "-i", str(strip_path), "-loop", "1", "-i", str(label_path),
@@ -766,12 +1001,17 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
     list_file.write_text("".join(f"file '{p.resolve()}'\n" for p in clip_paths),
                          encoding="utf-8")
     video_path = out_dir / "bulletin.mp4"
+    raw_path = seg_dir / "bulletin_raw.mp4"
     proc = _run_ffmpeg([
         ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
-        "-c", "copy", "-movflags", "+faststart", str(video_path)], config)
-    if proc.returncode != 0 or not video_path.exists():
+        "-c", "copy", "-movflags", "+faststart", str(raw_path)], config)
+    if proc.returncode != 0 or not raw_path.exists():
         raise ShortUnavailable(
             "ffmpeg bulletin concat failed: " + redact(proc.stderr[-500:], config.secret_values))
+    # Soft news bed, low under the anchor for the whole bulletin.
+    mixed = mix_background_music(raw_path, video_path, elapsed, seg_dir, config=config)
+    if mixed != video_path:
+        mixed.replace(video_path)
 
     combined = out_dir / "voiceover_urdu.mp3"
     try:
@@ -802,6 +1042,10 @@ def build_bulletin(stories: list[EditorialContent], out_dir: Path,
         "rate": config.tts_rate,
         "pitch": getattr(config, "tts_pitch", "-2Hz"),
         "story_count": len(stories),
+        "format": fmt,
+        "width": W,
+        "height": H,
+        "music_bed": "soft news bed, low throughout",
         "segments": timed,
     }
 
