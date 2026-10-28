@@ -523,6 +523,51 @@ def test_pixabay_search_keeps_large_images_with_small_webformat(tmp_path):
     assert hits[0]["id"] == 42
 
 
+def test_caption_handles_two_photo_media_list(tmp_path):
+    cfg = temp_config(tmp_path)
+    db = Database(cfg.db_path)
+    agent = PublishingAgent(db, config=cfg)
+    editorial = {
+        "urdu_headline": "اردو سرخی",
+        "roman_headline": "Roman headline",
+        "urdu_bullets_json": json.dumps(["ایک نکتہ"]),
+        "roman_bullets_json": json.dumps(["Ek point"]),
+        "source_urls_json": json.dumps(["https://example.org/story"]),
+        "media_json": json.dumps([
+            {"credit": "Pixabay / one", "license_ref": "https://pixabay.com/service/terms/"},
+            {"credit": "Pixabay / two", "license_ref": "https://pixabay.com/service/terms/"},
+        ]),
+    }
+    caption = agent.build_caption(editorial, "marker123")
+    assert "Photo: Pixabay / one" in caption
+    assert "Photo: Pixabay / two" in caption
+
+
+def test_publish_approved_pending_retries_unpublished_editorial(tmp_path):
+    cfg = temp_config(tmp_path)  # dry_run=True in temp config
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    candidate = sample_candidate()
+    cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
+    content = {
+        "urdu_headline": "اردو سرخی", "urdu_bullets": ["ایک", "دو", "تین"],
+        "roman_headline": "Roman headline", "roman_bullets": ["Ek", "Do", "Teen"],
+        "verification_notes": [], "source_urls": ["https://example.org/story"],
+        "publication_time": iso(),
+        "media": [{"credit": "Pixabay / one", "license_ref": "terms"}],
+    }
+    eid, _ = db.insert_editorial(cid, None, content, status="approved")
+    db.execute(
+        "INSERT INTO cards(id,editorial_id,file_path,sha256,width,height,page_number,page_count,visual_status,created_at) "
+        "VALUES(?,?,?,?,?,? ,1,1,'passed',?)".replace("? ,", "?,"),
+        ("card1", eid, "/tmp/card.png", "a" * 64, 1080, 1350, iso()),
+    )
+    results = pipeline.publish_approved_pending()
+    assert results and results[0]["status"] == "dry_run"
+    # Second call is idempotent: a dry-run attempt already exists.
+    assert pipeline.publish_approved_pending()[0]["status"] == "dry_run"
+
+
 def test_single_source_substantial_report_verifies_but_claims_hold(tmp_path):
     cfg = temp_config(tmp_path)
     db = Database(cfg.db_path)

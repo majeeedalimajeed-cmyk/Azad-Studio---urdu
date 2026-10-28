@@ -45,6 +45,7 @@ class NewsPipeline:
                                          result.http_status)
         new_ids = self.research.ingest(results, mode)
         requeued = self.requeue_llm_held() + self.requeue_verification_held()
+        publish_retried = self.publish_approved_pending()
         self.db.insert_api_event("scheduler", "scan", "ok",
                                  f"{mode} scan examined {len(results)} configured sources",
                                  details={"new_candidates": len(new_ids),
@@ -59,6 +60,7 @@ class NewsPipeline:
             "new_candidates": new_ids,
             "jobs_queued": len(new_ids),
             "requeued_held": requeued,
+            "publish_retried": publish_retried,
         }
 
     def requeue_llm_held(self, limit: int = 10) -> int:
@@ -122,6 +124,39 @@ class NewsPipeline:
                 details={"requeued": requeued},
             )
         return requeued
+
+    def publish_approved_pending(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Publish approved editorials whose earlier publish step never ran
+        (e.g. it errored after rendering). Idempotency keys in the publisher
+        make this safe against duplicates."""
+        results: list[dict[str, Any]] = []
+        editorials = self.db.query(
+            "SELECT * FROM editorials WHERE status='approved' ORDER BY created_at ASC LIMIT ?",
+            (limit,),
+        )
+        for editorial in editorials:
+            success = self.db.one(
+                "SELECT id FROM publish_attempts WHERE editorial_id=? AND status='success'",
+                (editorial["id"],),
+            )
+            if success:
+                continue
+            card_row = self.db.one(
+                "SELECT * FROM cards WHERE editorial_id=? AND visual_status='passed' "
+                "ORDER BY page_number LIMIT 1",
+                (editorial["id"],),
+            )
+            if not card_row:
+                continue
+            try:
+                results.append(self.publisher.publish(
+                    editorial["id"], card_row, dry_run=self.config.dry_run))
+            except Exception as exc:  # never let one editorial block the scan
+                message = redact(f"{type(exc).__name__}: {exc}", self.config.secret_values)
+                self.db.insert_api_event("facebook", "publish", "error", message,
+                                         details={"editorial_id": editorial["id"]})
+                results.append({"status": "job_error", "reason": message})
+        return results
 
     def drain_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
         outputs: list[dict[str, Any]] = []
