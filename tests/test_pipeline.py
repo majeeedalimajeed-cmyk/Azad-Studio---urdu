@@ -553,12 +553,12 @@ def test_caption_handles_two_photo_media_list(tmp_path):
         ]),
     }
     caption = agent.build_caption(editorial, "marker123")
-    assert "Photo: Pixabay / one" in caption
-    assert "Photo: Pixabay / two" in caption
-    # Operator rule: no URLs anywhere in the public caption.
+    # Operator rule: no URLs and no photographer names in the public caption.
     assert "http" not in caption
     assert "Sources:" not in caption
     assert "example.org" not in caption
+    assert "Pixabay" not in caption
+    assert "Photo:" not in caption
 
 
 def test_publish_approved_pending_retries_unpublished_editorial(tmp_path):

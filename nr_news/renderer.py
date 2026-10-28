@@ -305,15 +305,8 @@ class CardRenderer:
         canvas.paste(im, (x0, y0), mask)
         d = ImageDraw.Draw(canvas)
         d.rounded_rectangle((x0, y0, x1 - 1, y1 - 1), radius=22, outline=GOLD, width=4)
-        # Operator rule: no URLs on the card. The license reference stays in
-        # the audit/metadata, not in the printed credit strip.
-        credit = f"Photo: {media['credit']}"
-        cf = self._font(False, 15, "Medium")
-        # Clamp credit to panel width and draw on a dark strip.
-        while d.textlength(credit, font=cf) > (w - 24) and len(credit) > 20:
-            credit = credit[:-5] + "…"
-        d.rectangle((x0 + 4, y1 - 32, x1 - 4, y1 - 4), fill=(0, 0, 0))
-        d.text((x0 + 12, y1 - 29), credit, font=cf, fill=GOLD_LIGHT)
+        # Operator rule: no credits or URLs printed on the photo; photographer
+        # credit and license references remain in the audit/metadata only.
 
     def draw_card(self, content: EditorialContent, output_path: Path, *,
                   media: list[dict[str, Any]] | dict[str, Any] | None = None,
