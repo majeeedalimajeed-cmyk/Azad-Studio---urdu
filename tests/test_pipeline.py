@@ -49,6 +49,9 @@ def temp_config(tmp_path: Path, **overrides):
         "expected_page_name": None,
         "pixabay_api_key": None,
         "pixabay_enabled": False,
+        # The verified fixture is a fixed historical snapshot; its tests must
+        # not expire when wall-clock time passes the production 36h window.
+        "max_story_age_hours": 24 * 365 * 10,
     }
     values.update(overrides)
     cfg = replace(CONFIG, **values)
