@@ -152,6 +152,9 @@ class Config:
     pixabay_api_base: str = field(default_factory=lambda: (
         os.getenv("NR_PIXABAY_API_BASE", "https://pixabay.com/api/").rstrip("/") + "/"))
     pixabay_enabled: bool = field(default_factory=lambda: _bool("NR_PIXABAY_ENABLED", True))
+    instagram_enabled: bool = field(default_factory=lambda: _bool("NR_INSTAGRAM_ENABLED", True))
+    instagram_user_id: str | None = field(
+        default_factory=lambda: os.getenv("NR_INSTAGRAM_USER_ID") or None)
     pixabay_per_page: int = int(os.getenv("NR_PIXABAY_PER_PAGE", "3"))
     pixabay_min_width: int = int(os.getenv("NR_PIXABAY_MIN_WIDTH", "800"))
     pixabay_min_height: int = int(os.getenv("NR_PIXABAY_MIN_HEIGHT", "600"))

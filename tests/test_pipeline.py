@@ -432,6 +432,64 @@ def test_graph_api_error_is_recorded_without_false_success(tmp_path):
     assert any(e["subsystem"] == "facebook" and e["status"] == "error" for e in db.api_events())
 
 
+def test_successful_publish_cross_posts_to_instagram(tmp_path):
+    cfg = temp_config(tmp_path, dry_run=False, publish_enabled=True, publish_safety_switch=True,
+                      operator_approved=True, verify_approved=True, auto_post_enabled=True,
+                      facebook_page_token="fake-token", expected_page_name="AZAD STUDIO")
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    db.set_setting("facebook_identity_verified_at", iso())
+    db.set_setting("facebook_page_id", "123456789")
+    db.set_setting("facebook_test_post_passed", "true")
+    candidate = sample_candidate(url="https://example.org/ig-story")
+    cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
+    content = {
+        "urdu_headline": "سرخی", "urdu_bullets": ["ایک", "دو", "تین"],
+        "roman_headline": "Headline", "roman_bullets": ["one", "two", "three"],
+        "verification_notes": [], "source_urls": [], "publication_time": iso(), "media": None,
+    }
+    eid, _ = db.insert_editorial(cid, None, content, status="approved")
+    card_id = db.insert_card(eid, str(tmp_path / "card.png"), "abc", 1080, 1350, 1, 1, "passed")
+    card = {"id": card_id, "file_path": str(tmp_path / "card.png"), "sha256": "abc",
+            "visual_status": "passed"}
+
+    class FakeGraph:
+        def confirmed_page_id(self):
+            return "123456789"
+
+        def publish_photo(self, *args, **kwargs):
+            return {"id": "photo1", "post_id": "123456789_999"}
+
+        def find_recent_caption(self, *args, **kwargs):
+            return None
+
+        def instagram_account_id(self, page_id):
+            return "17841400000000000"
+
+        def post_image_url(self, post_id):
+            return "https://scontent.example/card.jpg"
+
+        def ig_create_container(self, ig_id, image_url, caption):
+            assert "http" not in caption
+            return "creation1"
+
+        def ig_container_status(self, creation_id):
+            return "FINISHED"
+
+        def ig_publish_container(self, ig_id, creation_id):
+            return "media1"
+
+        def ig_permalink(self, media_id):
+            return "https://www.instagram.com/p/TEST/"
+
+    pipeline.publisher.graph = FakeGraph()
+    result = pipeline.publisher.publish(eid, card, dry_run=False)
+    assert result["status"] == "success"
+    assert result["instagram"]["status"] == "success"
+    assert result["instagram"]["permalink"] == "https://www.instagram.com/p/TEST/"
+    assert db.get_setting("instagram_media_for_123456789_999") == "media1"
+
+
 def test_publisher_name_not_allowed_on_card(tmp_path):
     cfg = temp_config(tmp_path)
     validator = TranslationValidator(config=cfg)

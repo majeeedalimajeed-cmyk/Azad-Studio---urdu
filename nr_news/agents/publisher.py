@@ -148,8 +148,11 @@ class PublishingAgent:
                                          http_status=200,
                                          details={"page_id": page_id, "post_id": post_id,
                                                   "attempt": attempt_no, "test": test})
-                return {"status": "success", "post_id": post_id, "attempt_id": pid,
-                        "attempts": attempt_no, "caption_marker": marker}
+                result = {"status": "success", "post_id": post_id, "attempt_id": pid,
+                          "attempts": attempt_no, "caption_marker": marker}
+                result["instagram"] = self._cross_post_instagram(
+                    page_id, post_id, caption, test=test)
+                return result
             except GraphAPIError as exc:
                 last_error = exc
                 self.db.insert_api_event("facebook", "publish_photo", "error", str(exc),
@@ -169,6 +172,64 @@ class PublishingAgent:
                 return {"status": "unknown", "reason": "Network/API result ambiguous; manual reconciliation required.",
                         "attempt_id": pid}
         return {"status": "unknown", "reason": str(last_error) if last_error else "retry loop ended", "attempt_id": pid}
+
+    def _cross_post_instagram(self, page_id: str, post_id: str, caption: str,
+                              *, test: bool = False) -> dict[str, Any]:
+        """Cross-post a published Facebook card to the linked Instagram
+        account. Never fails the Facebook post; the public Facebook photo
+        URL is the publicly reachable image Instagram requires."""
+        if test:
+            return {"status": "skipped", "reason": "test_post"}
+        if not self.config.instagram_enabled:
+            return {"status": "skipped", "reason": "instagram_disabled"}
+        existing = self.db.get_setting(f"instagram_media_for_{post_id}")
+        if existing:
+            return {"status": "already_published", "media_id": existing}
+        try:
+            ig_id = (self.config.instagram_user_id
+                     or self.db.get_setting("instagram_user_id")
+                     or self.graph.instagram_account_id(page_id))
+            if not ig_id:
+                self.db.insert_api_event("instagram", "publish", "held",
+                                         "No linked Instagram account found for the Page.")
+                return {"status": "skipped", "reason": "no_instagram_account"}
+            self.db.set_setting("instagram_user_id", ig_id)
+            image_url = self.graph.post_image_url(post_id)
+            if not image_url:
+                self.db.insert_api_event("instagram", "publish", "error",
+                                         "Facebook post had no public image URL for Instagram.",
+                                         details={"post_id": post_id})
+                return {"status": "failed", "reason": "no_public_image_url"}
+            creation_id = self.graph.ig_create_container(ig_id, image_url, caption)
+            for _ in range(6):
+                status = self.graph.ig_container_status(creation_id)
+                if status == "FINISHED":
+                    break
+                if status == "ERROR":
+                    raise GraphAPIError("Instagram container processing failed",
+                                        code="CONTAINER_ERROR")
+                time.sleep(5)
+            media_id = self.graph.ig_publish_container(ig_id, creation_id)
+            permalink = self.graph.ig_permalink(media_id)
+            self.db.set_setting(f"instagram_media_for_{post_id}", media_id)
+            if permalink:
+                self.db.set_setting(f"instagram_permalink_for_{post_id}", permalink)
+            self.db.insert_api_event("instagram", "publish", "success",
+                                     "Instagram cross-post published.",
+                                     http_status=200,
+                                     details={"ig_user_id": ig_id, "media_id": media_id,
+                                              "permalink": permalink, "fb_post_id": post_id})
+            return {"status": "success", "media_id": media_id, "permalink": permalink}
+        except GraphAPIError as exc:
+            self.db.insert_api_event("instagram", "publish", "error", str(exc),
+                                     http_status=exc.status, error_code=exc.code,
+                                     details={"fb_post_id": post_id})
+            return {"status": "failed", "reason": str(exc)}
+        except Exception as exc:  # Instagram must never break Facebook posting
+            message = redact(f"{type(exc).__name__}: {exc}", self.config.secret_values)
+            self.db.insert_api_event("instagram", "publish", "error", message,
+                                     details={"fb_post_id": post_id})
+            return {"status": "failed", "reason": message}
 
     def _hold(self, idempotency_key: str, editorial_id: str, card_row: dict[str, Any],
               caption_hash: str, reason: str) -> dict[str, Any]:

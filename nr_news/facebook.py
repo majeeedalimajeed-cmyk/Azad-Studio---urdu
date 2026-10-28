@@ -289,6 +289,60 @@ class FacebookGraphClient:
             )
         return None
 
+    # --- Instagram cross-posting (linked Instagram professional account) ---
+    def instagram_account_id(self, page_id: str) -> str | None:
+        payload = self._call(
+            "GET", f"/{page_id}", token=self.config.facebook_page_token or "",
+            params={"fields": "instagram_business_account{id,username}"},
+        )
+        account = payload.get("instagram_business_account") or {}
+        return str(account["id"]) if account.get("id") else None
+
+    def post_image_url(self, post_id: str) -> str | None:
+        payload = self._call(
+            "GET", f"/{post_id}/attachments",
+            token=self.config.facebook_page_token or "",
+        )
+        for item in payload.get("data", []):
+            src = ((item.get("media") or {}).get("image") or {}).get("src")
+            if src:
+                return str(src)
+        return None
+
+    def ig_create_container(self, ig_user_id: str, image_url: str, caption: str) -> str:
+        payload = self._call(
+            "POST", f"/{ig_user_id}/media",
+            token=self.config.facebook_page_token or "",
+            data={"image_url": image_url, "caption": caption},
+        )
+        if not payload.get("id"):
+            raise GraphAPIError("Instagram container response had no ID", code="NO_CONTAINER_ID")
+        return str(payload["id"])
+
+    def ig_container_status(self, creation_id: str) -> str:
+        payload = self._call(
+            "GET", f"/{creation_id}", token=self.config.facebook_page_token or "",
+            params={"fields": "status_code"},
+        )
+        return str(payload.get("status_code") or "")
+
+    def ig_publish_container(self, ig_user_id: str, creation_id: str) -> str:
+        payload = self._call(
+            "POST", f"/{ig_user_id}/media_publish",
+            token=self.config.facebook_page_token or "",
+            data={"creation_id": creation_id},
+        )
+        if not payload.get("id"):
+            raise GraphAPIError("Instagram publish response had no media ID", code="NO_MEDIA_ID")
+        return str(payload["id"])
+
+    def ig_permalink(self, media_id: str) -> str | None:
+        payload = self._call(
+            "GET", f"/{media_id}", token=self.config.facebook_page_token or "",
+            params={"fields": "permalink"},
+        )
+        return str(payload["permalink"]) if payload.get("permalink") else None
+
     def get_post(self, post_id: str) -> dict[str, Any]:
         """Independently confirm a published post through the Graph API."""
         tokens = [t for t in (self.config.facebook_page_token,

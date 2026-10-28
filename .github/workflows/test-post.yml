@@ -34,6 +34,7 @@ jobs:
       NR_VALIDATOR_MODEL: ${{ vars.NR_VALIDATOR_MODEL || 'grok-4.6' }}
       NR_PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       NR_PIXABAY_ENABLED: ${{ vars.NR_PIXABAY_ENABLED || 'true' }}
+      NR_INSTAGRAM_ENABLED: ${{ vars.NR_INSTAGRAM_ENABLED || 'true' }}
     steps:
       - uses: actions/checkout@v4
 
