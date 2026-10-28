@@ -523,6 +523,20 @@ def test_pixabay_search_keeps_large_images_with_small_webformat(tmp_path):
     assert hits[0]["id"] == 42
 
 
+def test_long_headlines_fit_gold_bands(tmp_path):
+    cfg = temp_config(tmp_path)
+    content = EditorialContent(
+        urdu_headline="STANFEST 2026: بھارت کا سب سے بڑا تخلیق کار اور گیمنگ میلہ بنگلور میں منعقد ہوگا",
+        urdu_bullets=["پہلا نکتہ یہاں درج ہے", "دوسرا نکتہ یہاں درج ہے", "تیسرا نکتہ یہاں درج ہے"],
+        roman_headline="STANFEST 2026: India ka sab se bara takhleeq kar aur gaming mela Bengaluru mein",
+        roman_bullets=["Pehla point yahan hai", "Doosra point yahan hai", "Teesra point yahan hai"],
+        verification_notes=[], source_urls=["https://example.org/story"],
+        publication_time=iso(), media=None,
+    )
+    cards = CardRenderer(cfg).render_cards(content, "long-headline-test")
+    assert cards and cards[0].visual_status == "passed"
+
+
 def test_caption_handles_two_photo_media_list(tmp_path):
     cfg = temp_config(tmp_path)
     db = Database(cfg.db_path)

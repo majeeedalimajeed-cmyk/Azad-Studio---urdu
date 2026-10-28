@@ -260,14 +260,15 @@ class CardRenderer:
         # Twin slashes on the left edge, as in the supplied reference design.
         d.line((48, y + 12, 72, y + height - 12), fill=GOLD_DARK, width=5)
         d.line((60, y + 12, 84, y + height - 12), fill=GOLD_DARK, width=3)
-        sizes = [40, 37, 34, 31, 28] if rtl else [42, 39, 36, 33, 30, 27]
+        sizes = [40, 37, 34, 31, 28, 25, 23] if rtl else [42, 39, 36, 33, 30, 27, 24]
         max_width = 900
         for size in sizes:
             f = self._font(rtl, size, "Bold")
             lines = self.wrap(d, text, f, max_width, rtl)
-            if len(lines) <= 2 and all(self._text_length(d, line, f, rtl) <= max_width for line in lines):
-                line_h = size * (1.45 if rtl else 1.05)
-                total_h = len(lines) * line_h
+            line_h = size * (1.45 if rtl else 1.08)
+            total_h = len(lines) * line_h
+            if (len(lines) <= 2 and total_h <= height - 6
+                    and all(self._text_length(d, line, f, rtl) <= max_width for line in lines)):
                 start_y = y + (height - total_h) / 2 + (-8 if rtl else 0)
                 for idx, line in enumerate(lines):
                     x = WIDTH - 70 if rtl else 75
