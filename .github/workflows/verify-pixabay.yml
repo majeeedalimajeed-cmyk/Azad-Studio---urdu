@@ -37,10 +37,10 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Verify Pixabay API without printing the key
-        run: python -m nr_news.cli verify-pixabay --query "${{ inputs.query }}"
+        run: python -m nr_news.cli verify-pixabay --query "$PIXABAY_QUERY"
 
       - name: Render non-published two-photo demo card
-        run: python -m nr_news.cli pixabay-demo --query "${{ inputs.query }}" --output reports/PIXABAY_DEMO.md
+        run: python -m nr_news.cli pixabay-demo --query "$PIXABAY_QUERY" --output reports/PIXABAY_DEMO.md
 
       - name: Write Pixabay demo summary
         run: |
