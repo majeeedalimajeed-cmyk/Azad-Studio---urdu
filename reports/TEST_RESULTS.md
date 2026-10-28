@@ -58,3 +58,9 @@ Live publishing remains disabled until operator approval, all safety flags, and 
 - Hourly run `40672547400` SUCCESS end-to-end (verify fixed, scan, worker, shorts-cycle): Short uploaded from the automation: https://www.youtube.com/shorts/DyIxwY-eaf4
 - One story (STANFEST) failed its morning pick: stored Pixabay photo file does not persist between runners. Fixed: `normalize_media` drops entries whose local file is missing (clean text fallback, no crash), and the hourly workflow now caches `data/media` alongside the SQLite DB.
 - Tests: full suite passing.
+
+## Broadcast-style synced Shorts (operator redesign)
+- News cards removed from videos. Each narration segment (welcome -> today's latest news -> headline -> bullets) is synthesised and timed separately; its slide appears exactly while the anchor reads it. Active bullet is highlighted in a gold-framed card with a numbered badge and progress dots; the story headline stays at the top for context.
+- Premium newsroom frame: exact monogram brand bar, red LATEST pill, dark sheen background, smooth 0.22s fades, and a bottom ticker bar (red "تازہ ترین" label) with the Roman headline scrolling underneath it (PIL strip overlay, no drawtext dependency).
+- Breaking Shorts insert a red "بریکنگ نیوز" slide after the intro and read all bullets.
+- Tests: 40 passed (segment order/timing + 1080x1920 slide size asserted). Proof uploads: test3 broadcast demo (see YouTube), frames verified at 16s/24s switching bullets 1 -> 2.

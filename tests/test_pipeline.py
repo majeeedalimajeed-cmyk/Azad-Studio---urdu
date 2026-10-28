@@ -709,8 +709,6 @@ def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
         roman_headline="Roman headline", roman_bullets=["one", "two", "three"],
         verification_notes=[], source_urls=[], publication_time=iso(), media=None,
     )
-    card = tmp_path / "card.png"
-    Image.new("RGB", (1080, 1350), (10, 10, 10)).save(card)
 
     def fake_tts(text, voice, rate, out_path):
         import wave
@@ -723,10 +721,20 @@ def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
 
     monkeypatch.setattr(shorts, "synthesize_tts", fake_tts)
     monkeypatch.setattr(shorts, "audio_duration", lambda p: 2.0)
-    built = shorts.build_short(card, content, tmp_path / "out", config=cfg)
+    built = shorts.build_short(content, tmp_path / "out", config=cfg)
     video = Path(built["video_path"])
     assert video.exists() and video.stat().st_size > 10_000
-    assert built["duration_seconds"] == 2.0
+    # welcome + today's-news + headline + 3 bullets, each 2.0s + 0.3s gap
+    assert [s["kind"] for s in built["segments"]] == [
+        "welcome", "latest", "headline", "bullet", "bullet", "bullet"]
+    assert built["segments"][-1]["starts_at"] > built["segments"][0]["starts_at"]
+    assert built["duration_seconds"] == pytest.approx(6 * 2.3)
+    seg_dir = Path(built["video_path"]).parent / "segments"
+    slides = sorted(seg_dir.glob("slide_*.png"))
+    assert len(slides) == 6
+    from PIL import Image as _Im
+    with _Im.open(slides[3]) as im:  # first bullet slide
+        assert im.size == (1080, 1920)
 
 
 def test_urdu_script_starts_with_welcome():

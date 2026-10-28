@@ -354,18 +354,14 @@ def cmd_pixabay_demo(args) -> int:
 
 
 def cmd_shorts_demo(args) -> int:
-    """Build a YouTube Short (Urdu-only male TTS) from the fixture card."""
+    """Build a broadcast-style YouTube Short (Urdu-only male TTS) from the fixture."""
     from .shorts import YouTubeClient, build_short, youtube_description, youtube_title
 
     CONFIG.ensure_dirs()
     fixture, content = _fixture_editorial(args)
-    cards = CardRenderer(CONFIG).render_cards(content, "shorts-demo", media=None)
-    if not cards:
-        print(json_dumps({"ok": False, "reason": "card_render_failed"}))
-        return 2
     out_dir = CONFIG.data_dir / "videos" / "shorts-demo"
-    built = build_short(Path(cards[0].path), content, out_dir, config=CONFIG)
-    result: dict = {"ok": True, "card": cards[0].path, **built}
+    built = build_short(content, out_dir, config=CONFIG)
+    result: dict = {"ok": True, **built}
     if args.upload:
         youtube = YouTubeClient(config=CONFIG)
         if not youtube.available:

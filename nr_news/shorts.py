@@ -1,5 +1,7 @@
-"""YouTube Shorts builder: card PNG + Urdu-only male TTS -> 1080x1920 MP4,
-uploaded through the YouTube Data API v3 (OAuth2 refresh-token flow).
+"""YouTube Shorts builder: broadcast-style synced slides + Urdu-only male
+TTS -> 1080x1920 MP4, uploaded through the YouTube Data API v3
+(OAuth2 refresh-token flow). News cards are NOT used in the video; each
+narration segment gets its own timed slide and headline ticker.
 
 Narration reads the approved Urdu headline and bullets only. The public
 title/description never contain URLs, per operator rule.
@@ -42,21 +44,40 @@ def detect_breaking(*texts: str | None) -> bool:
     return any(marker in blob for marker in BREAKING_MARKERS)
 
 
-def urdu_script(content: EditorialContent, *, full_details: bool = False) -> str:
-    """Urdu-only narration: welcome, headline, then bullets.
+def narration_segments(content: EditorialContent, *, full_details: bool = False) -> list[dict[str, Any]]:
+    """Ordered narration segments; each becomes one timed slide + voice clip.
 
-    Scheduled Shorts read the first three bullets; a breaking Short
-    (``full_details=True``) announces itself and reads every bullet.
+    Segments: welcome -> today's-news intro -> [breaking announcement] ->
+    headline -> bullets. Scheduled Shorts read the first three bullets; a
+    breaking Short reads every bullet (full details).
     """
     bullets = list(content.urdu_bullets)
     if not full_details:
         bullets = bullets[:3]
-    parts = [WELCOME_URDU, TODAYS_NEWS_URDU]
+    segments: list[dict[str, Any]] = [
+        {"kind": "welcome", "text": WELCOME_URDU},
+        {"kind": "latest", "text": TODAYS_NEWS_URDU},
+    ]
     if full_details:
-        parts.append(BREAKING_URDU)
-    parts += [content.urdu_headline] + bullets
-    cleaned = [clean_text(p, 400).rstrip("۔. ").strip() for p in parts]
-    return "۔\n".join(p for p in cleaned if p) + "۔"
+        segments.append({"kind": "breaking", "text": BREAKING_URDU})
+    segments.append({"kind": "headline", "text": content.urdu_headline})
+    for idx, bullet in enumerate(bullets, 1):
+        segments.append({"kind": "bullet", "index": idx,
+                         "total": len(bullets), "text": bullet})
+    cleaned: list[dict[str, Any]] = []
+    for seg in segments:
+        text = clean_text(seg["text"], 400).rstrip("۔. ").strip()
+        if text:
+            cleaned.append({**seg, "text": text})
+    return cleaned
+
+
+def urdu_script(content: EditorialContent, *, full_details: bool = False) -> str:
+    """Urdu-only narration script: welcome, today's-news intro, headline,
+    then bullets, sentence breaks. Breaking (full_details) reads all bullets.
+    """
+    parts = [seg["text"] for seg in narration_segments(content, full_details=full_details)]
+    return "۔\n".join(parts) + "۔"
 
 
 def ffmpeg_exe() -> str:
@@ -96,44 +117,279 @@ def audio_duration(path: Path) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-def build_short(card_path: Path, content: EditorialContent, out_dir: Path,
+def _run_ffmpeg(cmd: list[str], config=CONFIG) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+
+SLIDE_W, SLIDE_H = 1080, 1920
+SEGMENT_GAP_SECONDS = 0.30
+_FPS = 30
+
+
+def render_slide(content: EditorialContent, segment: dict[str, Any],
+                 out_path: Path, *, config=CONFIG) -> Path:
+    """Render one 1080x1920 broadcast slide for a narration segment.
+
+    Premium dark newsroom look: brand bar with the exact monogram, headline
+    context kept on screen, the active bullet highlighted in a gold-framed
+    card with progress dots, and a red-label ticker bar along the bottom.
+    """
+    from PIL import Image, ImageDraw
+
+    from .renderer import CardRenderer, gradient, isolate_latin, load_logo, proportional_logo
+
+    renderer = CardRenderer(config)
+    logo = load_logo()
+    im = gradient((SLIDE_W, SLIDE_H), (8, 13, 28), (3, 4, 8))
+    d = ImageDraw.Draw(im, "RGBA")
+    # Subtle diagonal sheen and a soft gold glow, keeping the frame calm.
+    for i in range(-4, 12):
+        x = i * 170
+        d.polygon([(x, SLIDE_H), (x + 430, 0), (x + 540, 0), (x + 110, SLIDE_H)],
+                  fill=(255, 255, 255, 5))
+    for r in range(460, 60, -50):
+        d.ellipse((SLIDE_W - 430 - r, -330 - r, SLIDE_W - 430 + r, -330 + r),
+                  fill=(226, 184, 74, 5))
+
+    def rtl(text, size, *, weight="Bold", fill=(248, 247, 242), xy=(0, 0),
+            anchor="ra", max_width=920, max_lines=4, line_factor=1.65):
+        fnt = renderer._font(True, size, weight)
+        lines = renderer.wrap(d, text, fnt, max_width, True)
+        while len(lines) > max_lines and size > 24:
+            size -= 2
+            fnt = renderer._font(True, size, weight)
+            lines = renderer.wrap(d, text, fnt, max_width, True)
+        lh = size * line_factor
+        for i, line in enumerate(lines):
+            d.text((xy[0], xy[1] + i * lh), isolate_latin(line), font=fnt, fill=fill,
+                   anchor=anchor, direction="rtl", language="ur")
+        return lines, fnt, lh
+
+    # --- Brand bar ------------------------------------------------------
+    d.rectangle((0, 0, SLIDE_W, 150), fill=(6, 8, 16))
+    d.rectangle((0, 150, SLIDE_W, 154), fill=(226, 184, 74))
+    scaled = proportional_logo(logo, 104)
+    im.paste(scaled, (44, 23), scaled)
+    brand_f = renderer._font(False, 42, "Bold")
+    d.text((44 + scaled.width + 26, 75), "AZAD STUDIO", font=brand_f,
+           fill=(255, 231, 151), anchor="lm")
+    d.rounded_rectangle((SLIDE_W - 292, 44, SLIDE_W - 44, 106), radius=31,
+                        fill=(190, 24, 35))
+    latest_f = renderer._font(False, 32, "Bold")
+    d.text((SLIDE_W - 168, 75), "LATEST", font=latest_f, fill=(255, 255, 255),
+           anchor="mm")
+
+    # --- Segment body ---------------------------------------------------
+    kind = segment["kind"]
+    if kind == "welcome":
+        from .renderer import paste_logo
+        paste_logo(im, logo, SLIDE_W // 2, 430, 210)
+        rtl(segment["text"], 62, fill=(255, 231, 151),
+            xy=(SLIDE_W // 2, 830), anchor="mm", max_lines=2)
+        rtl(TODAYS_NEWS_URDU, 42, fill=(248, 247, 242),
+            xy=(SLIDE_W // 2, 990), anchor="mm", max_lines=2)
+    elif kind == "latest":
+        rtl(segment["text"], 66, fill=(248, 247, 242),
+            xy=(SLIDE_W // 2, 860), anchor="mm", max_lines=2)
+        sub_f = renderer._font(False, 30, "SemiBold")
+        d.text((SLIDE_W // 2, 1000), "AZAD STUDIO", font=sub_f,
+               fill=(226, 184, 74), anchor="mm")
+    elif kind == "breaking":
+        d.rounded_rectangle((80, 730, SLIDE_W - 80, 950), radius=36,
+                            fill=(190, 24, 35))
+        rtl(segment["text"], 78, fill=(255, 255, 255),
+            xy=(SLIDE_W // 2, 840), anchor="mm", max_lines=1)
+        rtl(content.urdu_headline, 36, fill=(226, 214, 180),
+            xy=(SLIDE_W - 80, 1030), anchor="ra", max_width=920, max_lines=3)
+    elif kind == "headline":
+        # Today's-news kicker, then the story headline large.
+        d.rectangle((SLIDE_W - 62, 196, SLIDE_W - 50, 232), fill=(190, 24, 35))
+        rtl(TODAYS_NEWS_URDU, 30, fill=(226, 184, 74),
+            xy=(SLIDE_W - 84, 200), anchor="ra", max_lines=1)
+        rtl(segment["text"], 54, xy=(SLIDE_W - 80, 470), max_lines=5)
+    else:  # bullet: persistent headline + highlighted active-bullet card
+        d.rectangle((SLIDE_W - 62, 186, SLIDE_W - 50, 218), fill=(190, 24, 35))
+        rtl(TODAYS_NEWS_URDU, 26, fill=(226, 184, 74),
+            xy=(SLIDE_W - 84, 188), anchor="ra", max_lines=1)
+        rtl(content.urdu_headline, 32, fill=(205, 212, 228),
+            xy=(SLIDE_W - 80, 250), max_lines=3)
+        d.rounded_rectangle((56, 500, SLIDE_W - 56, 1380), radius=30,
+                            fill=(13, 18, 32), outline=(226, 184, 74), width=3)
+        d.rectangle((SLIDE_W - 84, 540, SLIDE_W - 70, 1340), fill=(226, 184, 74))
+        badge_cx, badge_cy = SLIDE_W - 150, 592
+        d.ellipse((badge_cx - 36, badge_cy - 36, badge_cx + 36, badge_cy + 36),
+                  fill=(226, 184, 74))
+        num_f = renderer._font(False, 38, "Bold")
+        d.text((badge_cx, badge_cy + 2), str(segment["index"]), font=num_f,
+               fill=(20, 14, 2), anchor="mm")
+        # Fit, then vertically centre the active bullet inside the card.
+        size = 44
+        while True:
+            fnt_b = renderer._font(True, size, "Bold")
+            lines_b = renderer.wrap(d, segment["text"], fnt_b, SLIDE_W - 280, True)
+            if len(lines_b) <= 7 or size <= 30:
+                break
+            size -= 2
+        lh_b = size * 1.65
+        y_text = 575 + max(0.0, (720 - len(lines_b) * lh_b) / 2)
+        for i, line in enumerate(lines_b):
+            d.text((SLIDE_W - 130, y_text + i * lh_b), isolate_latin(line),
+                   font=fnt_b, fill=(248, 247, 242), anchor="ra",
+                   direction="rtl", language="ur")
+        total = int(segment.get("total") or 1)
+        idx = int(segment.get("index") or 1)
+        dots_w = total * 46 - 24
+        x0 = (SLIDE_W - dots_w) // 2
+        for i in range(1, total + 1):
+            cx = x0 + (i - 1) * 46 + 11
+            d.ellipse((cx - 11, 1459, cx + 11, 1481),
+                      fill=(226, 184, 74) if i <= idx else (74, 82, 104))
+
+    # --- Ticker bar (red label + scrolling strip are overlaid at build) --
+    d.rectangle((0, 1690, SLIDE_W, 1816), fill=(2, 2, 4))
+    d.rectangle((0, 1690, SLIDE_W, 1694), fill=(226, 184, 74))
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    im.save(out_path)
+    return out_path
+
+
+def build_short(content: EditorialContent, out_dir: Path,
                 *, config=CONFIG, full_details: bool = False) -> dict[str, Any]:
-    """Render a 9:16 Short (blurred backdrop + centered card + slow zoom)."""
-    if not Path(card_path).exists():
-        raise ShortUnavailable("Card image is unavailable for the Short")
+    """Build a broadcast-style Short synced segment-by-segment to the TTS.
+
+    Each narration segment is synthesised separately, timed, and paired with
+    its own slide: welcome -> today's news -> headline -> highlighted
+    bullets, changing exactly as the anchor moves on. A scrolling headline
+    ticker runs along the bottom. Returns paths and per-segment timings.
+    """
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    segments = narration_segments(content, full_details=full_details)
     script = urdu_script(content, full_details=full_details)
     (out_dir / "voiceover_urdu.txt").write_text(script, encoding="utf-8")
-    audio = synthesize_tts(script, config.tts_voice, config.tts_rate,
-                           out_dir / "voiceover_urdu.mp3")
-    duration = audio_duration(audio)
+
+    seg_dir = out_dir / "segments"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+
+    # Scrolling ticker strip + red label, rendered as images so the marquee
+    # works on any ffmpeg build (no drawtext dependency). The label is
+    # overlaid last, so the headline slides underneath it like a real ticker.
+    from PIL import Image, ImageDraw, ImageFont
+
+    from .renderer import font as _pil_font, isolate_latin
+
+    ticker_text = clean_text(content.roman_headline, 200) or "AZAD STUDIO"
+    strip_font = _pil_font(config.latin_font_path, 30, "Medium")
+    probe = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+    strip_w = int(probe.textlength(ticker_text, font=strip_font)) + 160
+    strip = Image.new("RGBA", (strip_w, 64), (0, 0, 0, 0))
+    ImageDraw.Draw(strip).text((80, 32), ticker_text, font=strip_font,
+                               fill=(235, 238, 245, 255), anchor="lm")
+    strip_path = seg_dir / "ticker_strip.png"
+    strip.save(strip_path)
+    label = Image.new("RGBA", (238, 126), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(label)
+    ld.rectangle((0, 0, 238, 126), fill=(190, 24, 35, 255))
+    urdu_f = ImageFont.truetype(str(config.urdu_font_path), 30)
+    ld.text((119, 63), isolate_latin("تازہ ترین"), font=urdu_f,
+            fill=(255, 255, 255, 255), anchor="mm", direction="rtl", language="ur")
+    label_path = seg_dir / "ticker_label.png"
+    label.save(label_path)
+
+    clip_paths: list[Path] = []
+    audio_parts: list[Path] = []
+    timed: list[dict[str, Any]] = []
+    elapsed = 0.0
+    for i, seg in enumerate(segments):
+        audio = synthesize_tts(seg["text"] + "۔", config.tts_voice, config.tts_rate,
+                               seg_dir / f"seg_{i:02d}.mp3")
+        seg_seconds = audio_duration(audio)
+        clip_seconds = seg_seconds + SEGMENT_GAP_SECONDS
+        slide = render_slide(content, seg, seg_dir / f"slide_{i:02d}.png", config=config)
+        clip = seg_dir / f"clip_{i:02d}.mp4"
+        fade_out = max(0.0, clip_seconds - 0.22)
+        fc_full = (
+            f"[0:v][1:v]overlay=x='1080-mod((t+{elapsed:.2f})*130\\,{1080 + strip_w})'"
+            ":y=1721[t1];[t1][2:v]overlay=0:1690[t2];"
+            f"[t2]fade=t=in:st=0:d=0.22,fade=t=out:st={fade_out:.2f}:d=0.22,"
+            "format=yuv420p[v]"
+        )
+        vf_plain = (
+            "scale=1080:1920,fade=t=in:st=0:d=0.22,"
+            f"fade=t=out:st={fade_out:.2f}:d=0.22,format=yuv420p"
+        )
+        attempts = [
+            [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide),
+             "-loop", "1", "-i", str(strip_path), "-loop", "1", "-i", str(label_path),
+             "-i", str(audio), "-filter_complex", fc_full,
+             "-af", f"apad,atrim=0:{clip_seconds:.2f}",
+             "-map", "[v]", "-map", "3:a"],
+            [ffmpeg_exe(), "-y", "-loop", "1", "-i", str(slide), "-i", str(audio),
+             "-vf", vf_plain, "-af", f"apad,atrim=0:{clip_seconds:.2f}",
+             "-map", "0:v", "-map", "1:a"],
+        ]
+        built_clip = False
+        for head in attempts:
+            cmd = head + [
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+                "-t", f"{clip_seconds:.2f}", str(clip),
+            ]
+            proc = _run_ffmpeg(cmd, config)
+            if proc.returncode == 0 and clip.exists():
+                built_clip = True
+                break
+        if not built_clip:
+            raise ShortUnavailable(
+                "ffmpeg segment failed: "
+                + redact(proc.stderr[-500:], config.secret_values))
+        clip_paths.append(clip)
+        audio_parts.append(audio)
+        timed.append({**seg, "seconds": round(seg_seconds, 2),
+                      "starts_at": round(elapsed, 2)})
+        elapsed += clip_seconds
+
+    # Concatenate segment clips into the final Short.
+    list_file = seg_dir / "clips.txt"
+    list_file.write_text("".join(f"file '{p.resolve()}'\n" for p in clip_paths),
+                         encoding="utf-8")
     video_path = out_dir / "short.mp4"
-    filters = (
-        "[0:v]split=2[bg][fg];"
-        "[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,gblur=sigma=45,eq=brightness=-0.30[bgv];"
-        "[fg]scale=1000:1250[fgs];"
-        "[bgv][fgs]overlay=(W-w)/2:(H-h)/2,"
-        "zoompan=z='min(1+0.0005*on,1.12)':d=1:s=1080x1920:fps=30,"
-        "fade=t=in:st=0:d=0.4,format=yuv420p[v]"
-    )
-    cmd = [
-        ffmpeg_exe(), "-y", "-loop", "1", "-i", str(card_path), "-i", str(audio),
-        "-filter_complex", filters, "-map", "[v]", "-map", "1:a",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-        "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2",
-        "-t", f"{duration + 1.3:.2f}", "-movflags", "+faststart", str(video_path),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    proc = _run_ffmpeg([
+        ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+        "-c", "copy", "-movflags", "+faststart", str(video_path)], config)
     if proc.returncode != 0 or not video_path.exists():
         raise ShortUnavailable(
-            "ffmpeg failed: " + redact(proc.stderr[-500:], config.secret_values))
+            "ffmpeg concat failed: " + redact(proc.stderr[-500:], config.secret_values))
+
+    # Combined narration track for audit (best effort).
+    combined = out_dir / "voiceover_urdu.mp3"
+    try:
+        silence = seg_dir / "silence.mp3"
+        _run_ffmpeg([ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                     "anullsrc=r=44100:cl=stereo", "-t", str(SEGMENT_GAP_SECONDS),
+                     "-c:a", "libmp3lame", "-q:a", "4", str(silence)], config)
+        parts: list[Path] = []
+        for j, audio in enumerate(audio_parts):
+            parts.append(audio)
+            if j < len(audio_parts) - 1:
+                parts.append(silence)
+        alist = seg_dir / "audio.txt"
+        alist.write_text("".join(f"file '{p.resolve()}'\n" for p in parts),
+                         encoding="utf-8")
+        _run_ffmpeg([ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0", "-i",
+                     str(alist), "-c:a", "libmp3lame", "-q:a", "3", str(combined)],
+                    config)
+    except Exception:
+        combined = audio_parts[0] if audio_parts else combined
+
     return {
         "video_path": str(video_path),
-        "audio_path": str(audio),
-        "duration_seconds": round(duration, 2),
+        "audio_path": str(combined),
+        "duration_seconds": round(elapsed, 2),
         "script": script,
         "voice": config.tts_voice,
+        "segments": timed,
     }
 
 

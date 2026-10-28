@@ -166,21 +166,16 @@ class VideoWorkflow:
 
     def _publish_short(self, row: dict[str, Any], kind: str,
                        now: datetime) -> dict[str, Any]:
-        """Render the card, build the Short and upload it. Caller records it."""
+        """Build the broadcast-style Short slide-by-slide and upload it."""
         from ..shorts import (ShortUnavailable, YouTubeClient, build_short,
                               youtube_description, youtube_title)
-        from .card import CardAgent
 
         client = YouTubeClient(config=self.config)
         if not client.available:
             raise ShortUnavailable("YouTube OAuth credentials are not configured")
         content = self.editorial_content(row)
-        cards = CardAgent(self.db, config=self.config).render(
-            row["id"], content, media=content.media)
-        if not cards:
-            raise ShortUnavailable("Card render failed for the Short")
         out_dir = self.config.data_dir / "video" / row["id"][:12]
-        built = build_short(Path(cards[0].path), content, out_dir,
+        built = build_short(content, out_dir,
                             config=self.config, full_details=(kind == "breaking"))
         uploaded = client.upload_short(
             Path(built["video_path"]),
