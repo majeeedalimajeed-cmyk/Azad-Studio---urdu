@@ -170,6 +170,14 @@ class Config:
     tts_voice: str = field(
         default_factory=lambda: os.getenv("NR_TTS_VOICE", "ur-PK-AsadNeural"))
     tts_rate: str = field(default_factory=lambda: os.getenv("NR_TTS_RATE", "-5%"))
+    # Shorts schedule (Asia/Kolkata): best 3 at 09:00, best 3 at 19:00, one
+    # slot of the daily 6 reserved for an immediate breaking Short.
+    shorts_morning_hour: int = int(os.getenv("NR_SHORTS_MORNING_HOUR", "9"))
+    shorts_evening_hour: int = int(os.getenv("NR_SHORTS_EVENING_HOUR", "19"))
+    shorts_daily_target: int = int(os.getenv("NR_SHORTS_DAILY_TARGET", "6"))
+    shorts_batch_size: int = int(os.getenv("NR_SHORTS_BATCH_SIZE", "3"))
+    shorts_breaking_window_hours: int = int(os.getenv("NR_SHORTS_BREAKING_WINDOW_HOURS", "6"))
+    shorts_lookback_hours: int = int(os.getenv("NR_SHORTS_LOOKBACK_HOURS", "48"))
     pixabay_per_page: int = int(os.getenv("NR_PIXABAY_PER_PAGE", "3"))
     pixabay_min_width: int = int(os.getenv("NR_PIXABAY_MIN_WIDTH", "800"))
     pixabay_min_height: int = int(os.getenv("NR_PIXABAY_MIN_HEIGHT", "600"))

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -726,6 +727,115 @@ def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
     video = Path(built["video_path"])
     assert video.exists() and video.stat().st_size > 10_000
     assert built["duration_seconds"] == 2.0
+
+
+def test_urdu_script_starts_with_welcome():
+    from nr_news.shorts import WELCOME_URDU, urdu_script
+
+    content = EditorialContent(
+        urdu_headline="سرخی", urdu_bullets=["ایک", "دو", "تین", "چار", "پانچ"],
+        roman_headline="Headline", roman_bullets=["a", "b", "c", "d", "e"],
+        verification_notes=[], source_urls=[], publication_time=iso(), media=None,
+    )
+    normal = urdu_script(content)
+    assert normal.startswith(WELCOME_URDU)
+    assert "Welcome" not in normal and "Headline" not in normal
+    assert "چار" not in normal and "پانچ" not in normal  # scheduled: first 3 bullets
+    full = urdu_script(content, full_details=True)
+    assert full.startswith(WELCOME_URDU)
+    assert "بریکنگ نیوز" in full
+    assert "چار" in full and "پانچ" in full  # breaking: full details
+
+
+def test_detect_breaking_markers():
+    from nr_news.shorts import detect_breaking
+
+    assert detect_breaking("بریکنگ: حیدرآباد میں اہم اعلان")
+    assert detect_breaking("BREAKING: Assembly session called")
+    assert detect_breaking(None, "Just in: cabinet decision")
+    assert not detect_breaking("حیدرآباد میں ترقیاتی منصوبے کا اعلان")
+    assert not detect_breaking("Government announces new school policy")
+
+
+def _published_editorial(db, pipeline, *, roman_headline: str, original_headline: str,
+                         published: datetime, urdu_headline: str = "اردو سرخی"):
+    candidate = Candidate(
+        source="test", publisher="Test Wire", url="https://example.com/" + uuid.uuid4().hex,
+        original_headline=original_headline,
+        published_at=iso(published), updated_at=None, language="en",
+        body_excerpt=original_headline + " detailed report from officials today.",
+        category="politics",
+    )
+    cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
+    content = EditorialContent(
+        urdu_headline=urdu_headline,
+        urdu_bullets=["نکتہ ایک", "نکتہ دو", "نکتہ تین", "نکتہ چار"],
+        roman_headline=roman_headline,
+        roman_bullets=["one", "two", "three", "four"],
+        verification_notes=[], source_urls=[], publication_time=iso(published), media=None,
+    )
+    eid, _ = db.insert_editorial(cid, None, content.to_dict(), status="published")
+    return eid
+
+
+def test_shorts_cycle_batches_and_breaking(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    from nr_news.agents.video import VideoWorkflow
+
+    cfg = temp_config(tmp_path, video_enabled=True, youtube_enabled=True, dry_run=False)
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    workflow = VideoWorkflow(db, config=cfg)
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_publish(self, row, kind, now):
+        calls.append((row["roman_headline"], kind))
+        return {"editorial_id": row["id"], "kind": kind,
+                "video_id": "VID-" + row["id"][:6],
+                "url": "https://www.youtube.com/shorts/VID", "at": iso(now)}
+
+    monkeypatch.setattr(VideoWorkflow, "_publish_short", fake_publish)
+
+    def utc(hour: int, minute: int = 0) -> datetime:
+        return datetime(2026, 10, 29, hour, minute, tzinfo=timezone.utc)
+
+    base = utc(3, 0)  # 08:30 IST
+    _published_editorial(db, pipeline, roman_headline="Hyderabad Telangana government election decision",
+                         original_headline="Telangana government announces election schedule for Hyderabad",
+                         published=base)
+    for i in range(4):
+        _published_editorial(db, pipeline, roman_headline=f"General story {i}",
+                             original_headline=f"Officials share update number {i} today",
+                             published=base)
+
+    # 08:00 IST: no batch due yet.
+    out = workflow.shorts_cycle(now=utc(2, 30))
+    assert out["uploaded"] == [] and calls == []
+
+    # 09:30 IST: morning batch of best 3 (top story first).
+    out = workflow.shorts_cycle(now=utc(4, 0))
+    assert len(out["uploaded"]) == 3
+    assert all(kind == "morning" for _, kind in calls)
+    assert calls[0][0] == "Hyderabad Telangana government election decision"
+
+    # 11:00 IST: breaking story appears; 11:30 IST tick posts it immediately.
+    _published_editorial(db, pipeline, roman_headline="Breaking assembly announcement",
+                         original_headline="BREAKING: Assembly announces emergency session",
+                         published=utc(5, 30))
+    out = workflow.shorts_cycle(now=utc(6, 0))
+    assert [k for _, k in calls[-1:]] == ["breaking"]
+    assert out["total_today"] == 4
+
+    # 19:30 IST: evening fills the day to 6 (3 + 1 breaking + 2).
+    out = workflow.shorts_cycle(now=utc(14, 0))
+    assert [k for _, k in calls[-2:]] == ["evening", "evening"]
+    assert out["total_today"] == 6
+
+    # Later ticks never re-upload.
+    out = workflow.shorts_cycle(now=utc(16, 0))
+    assert out["uploaded"] == [] and len(calls) == 6
 
 
 def test_single_source_substantial_report_verifies_but_claims_hold(tmp_path):

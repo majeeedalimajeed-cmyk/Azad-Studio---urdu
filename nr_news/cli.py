@@ -383,6 +383,16 @@ def cmd_shorts_demo(args) -> int:
     return 0
 
 
+def cmd_shorts_cycle(_args) -> int:
+    """Shorts scheduler tick: breaking first, then 09:00/19:00 IST best-news batches."""
+    from .agents import VideoWorkflow
+
+    CONFIG.ensure_dirs()
+    result = VideoWorkflow(config=CONFIG).shorts_cycle()
+    print(json_dumps(result))
+    return 0
+
+
 def cmd_verify_pixabay(args) -> int:
     client = PixabayClient(config=CONFIG)
     query = args.query or "Telangana government education exam"
@@ -525,6 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     shorts_demo.add_argument("--upload", action="store_true",
                              help="Also upload to YouTube when OAuth secrets are configured")
     shorts_demo.set_defaults(func=cmd_shorts_demo)
+    sub.add_parser("shorts-cycle").set_defaults(func=cmd_shorts_cycle)
     verify_pixabay = sub.add_parser("verify-pixabay")
     verify_pixabay.add_argument("--query", default=None)
     verify_pixabay.set_defaults(func=cmd_verify_pixabay)

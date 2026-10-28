@@ -37,3 +37,9 @@ Live publishing remains disabled until operator approval, all safety flags, and 
 - Tests: 36 passed (`test_urdu_script_excludes_roman_urdu`, `test_youtube_upload_uses_refresh_token_flow`, `test_build_short_produces_vertical_mp4`).
 - CLI `shorts-demo` verified end-to-end (27.7s narration, `data/videos/shorts-demo/short.mp4`). Manual demo from a live card: `data/videos/stanfest-short.mp4` (30.6s).
 - Upload stays OFF until OAuth credentials are stored as Actions secrets (`YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`) and `NR_VIDEO_ENABLED=true`.
+
+## YouTube Shorts schedule (welcome + best-news batches + breaking slot)
+- Narration now opens with the Urdu welcome "آزاد اسٹوڈیو میں خوش آمدید" (AZAD STUDIO), male voice `ur-PK-AsadNeural`.
+- `shorts-cycle` scheduler (IST): 1) reserved breaking Short first — urgent headline signals (بریکنگ / فوری خبر / breaking / just in) within 6h, narrated with FULL details (all bullets); 2) 09:00 batch of best 3; 3) 19:00 batch fills the day to 6 (3+2 when breaking fired, else 3+3; late breaking still posts as an extra). Best-news score = editorial priority (regional politics first) + recency + photo + detail. Duplicate-safe via per-day ledger + `youtube_video_for_{id}` settings. Per-story `prepare()` no longer uploads; it only writes scripts/storyboards.
+- Tests: 39 passed (new: `test_urdu_script_starts_with_welcome`, `test_detect_breaking_markers`, `test_shorts_cycle_batches_and_breaking`).
+- Verified locally: `shorts-cycle` reports disabled (no OAuth yet); `shorts-demo` narration begins with the welcome (30.6s).

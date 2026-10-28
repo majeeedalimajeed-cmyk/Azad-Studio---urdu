@@ -25,9 +25,35 @@ class ShortUnavailable(RuntimeError):
     pass
 
 
-def urdu_script(content: EditorialContent) -> str:
-    """Urdu-only narration script: headline, then bullets, sentence breaks."""
-    parts = [content.urdu_headline] + list(content.urdu_bullets)
+WELCOME_URDU = "آزاد اسٹوڈیو میں خوش آمدید"
+BREAKING_URDU = "بریکنگ نیوز"
+
+# Urgency signals for the reserved breaking-news Short (headline scan).
+BREAKING_MARKERS = (
+    "بریکنگ", "فوری خبر", "بڑی خبر", "فوری",
+    "breaking", "just in", "urgent", "flash",
+)
+
+
+def detect_breaking(*texts: str | None) -> bool:
+    """True when any supplied headline text carries an urgency signal."""
+    blob = " ".join(t for t in texts if t).lower()
+    return any(marker in blob for marker in BREAKING_MARKERS)
+
+
+def urdu_script(content: EditorialContent, *, full_details: bool = False) -> str:
+    """Urdu-only narration: welcome, headline, then bullets.
+
+    Scheduled Shorts read the first three bullets; a breaking Short
+    (``full_details=True``) announces itself and reads every bullet.
+    """
+    bullets = list(content.urdu_bullets)
+    if not full_details:
+        bullets = bullets[:3]
+    parts = [WELCOME_URDU]
+    if full_details:
+        parts.append(BREAKING_URDU)
+    parts += [content.urdu_headline] + bullets
     cleaned = [clean_text(p, 400).rstrip("۔. ").strip() for p in parts]
     return "۔\n".join(p for p in cleaned if p) + "۔"
 
@@ -70,12 +96,12 @@ def audio_duration(path: Path) -> float:
 
 
 def build_short(card_path: Path, content: EditorialContent, out_dir: Path,
-                *, config=CONFIG) -> dict[str, Any]:
+                *, config=CONFIG, full_details: bool = False) -> dict[str, Any]:
     """Render a 9:16 Short (blurred backdrop + centered card + slow zoom)."""
     if not Path(card_path).exists():
         raise ShortUnavailable("Card image is unavailable for the Short")
     out_dir.mkdir(parents=True, exist_ok=True)
-    script = urdu_script(content)
+    script = urdu_script(content, full_details=full_details)
     (out_dir / "voiceover_urdu.txt").write_text(script, encoding="utf-8")
     audio = synthesize_tts(script, config.tts_voice, config.tts_rate,
                            out_dir / "voiceover_urdu.mp3")

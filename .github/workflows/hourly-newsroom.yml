@@ -42,6 +42,8 @@ jobs:
       NR_YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
       NR_YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       NR_YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      NR_SHORTS_MORNING_HOUR: ${{ vars.NR_SHORTS_MORNING_HOUR || '9' }}
+      NR_SHORTS_EVENING_HOUR: ${{ vars.NR_SHORTS_EVENING_HOUR || '19' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,6 +79,9 @@ jobs:
           python -m nr_news.cli scan --mode hourly --drain-limit 100
           python -m nr_news.cli worker --limit 100
 
+      - name: YouTube Shorts cycle (breaking + 09:00/19:00 IST best-news batches)
+        run: python -m nr_news.cli shorts-cycle
+
       - name: Generate operations report
         run: python -m nr_news.cli report --output reports/DRY_RUN_REPORT.md
 
@@ -97,5 +102,6 @@ jobs:
           path: |
             data/cards/*.png
             data/audit/*.json
+            data/video/*/short.mp4
             reports/*.md
           if-no-files-found: warn
