@@ -63,7 +63,9 @@ jobs:
       - name: Restore durable SQLite database
         uses: actions/cache@v4
         with:
-          path: data/nr_news.sqlite3
+          path: |
+            data/nr_news.sqlite3
+            data/media
           key: nr-news-db-${{ github.run_id }}
           restore-keys: |
             nr-news-db-

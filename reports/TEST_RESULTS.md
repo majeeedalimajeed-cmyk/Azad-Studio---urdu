@@ -53,3 +53,8 @@ Live publishing remains disabled until operator approval, all safety flags, and 
 - Root cause: expired user token dropped verify to the Page-token fallback, which requested the `tasks` field directly on the Page node; Graph rejects that with `(#100)` for Page tokens, so hourly runs stopped before scan/publish.
 - Fix: fallback requests `id,name,link,category` only (tasks still honoured if present) and accepts `/me` resolving to the Page itself (only true for the Page's own token) as capability proof.
 - Tests: full suite passing.
+
+## First scheduled Short LIVE + runner photo-cache fix
+- Hourly run `40672547400` SUCCESS end-to-end (verify fixed, scan, worker, shorts-cycle): Short uploaded from the automation: https://www.youtube.com/shorts/DyIxwY-eaf4
+- One story (STANFEST) failed its morning pick: stored Pixabay photo file does not persist between runners. Fixed: `normalize_media` drops entries whose local file is missing (clean text fallback, no crash), and the hourly workflow now caches `data/media` alongside the SQLite DB.
+- Tests: full suite passing.

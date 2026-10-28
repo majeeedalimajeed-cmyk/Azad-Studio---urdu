@@ -507,14 +507,27 @@ def _gold_pixel_count(im: Image.Image, box: tuple[int, int, int, int]) -> int:
 
 def normalize_media(media: list[dict[str, Any]] | dict[str, Any] | None,
                     limit: int = 2) -> list[dict[str, Any]]:
-    """Accept legacy single-media dicts and new two-photo lists."""
+    """Accept legacy single-media dicts and new two-photo lists.
+
+    Entries whose local photo file no longer exists (e.g. a fresh CI runner
+    without the media cache) are dropped so the card falls back to the clean
+    text-led layout instead of crashing the render.
+    """
     if not media:
         return []
     if isinstance(media, dict):
-        return [media][:limit]
-    if isinstance(media, (list, tuple)):
-        return [m for m in media if isinstance(m, dict)][:limit]
-    return []
+        items = [media]
+    elif isinstance(media, (list, tuple)):
+        items = [m for m in media if isinstance(m, dict)]
+    else:
+        return []
+    usable = []
+    for item in items:
+        local = item.get("local_path")
+        if local and not Path(local).exists():
+            continue
+        usable.append(item)
+    return usable[:limit]
 
 
 def _photo_pixel_count(im: Image.Image, box: tuple[int, int, int, int]) -> int:

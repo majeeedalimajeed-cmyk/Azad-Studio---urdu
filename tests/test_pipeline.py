@@ -748,6 +748,19 @@ def test_urdu_script_starts_with_welcome():
     assert "چار" in full and "پانچ" in full  # breaking: full details
 
 
+def test_normalize_media_drops_missing_photo_files(tmp_path):
+    from nr_news.renderer import normalize_media
+
+    real = tmp_path / "photo.jpg"
+    Image.new("RGB", (8, 8)).save(real)
+    items = [
+        {"local_path": str(tmp_path / "gone.jpg"), "credit": "x"},
+        {"local_path": str(real), "credit": "y"},
+    ]
+    out = normalize_media(items)
+    assert [m["credit"] for m in out] == ["y"]
+
+
 def test_detect_breaking_markers():
     from nr_news.shorts import detect_breaking
 
