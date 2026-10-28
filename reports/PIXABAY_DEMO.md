@@ -1,18 +1,26 @@
 # AZAD STUDIO two-photo card demo
 
-**Status: local layout preview — synthetic placeholder images, not Pixabay photos.**
+**Status: live Pixabay verification PASSED in GitHub Actions — non-published demo card.**
 
-The updated renderer now follows the supplied reference design: a **narrow angled `LATEST NEWS` ribbon** instead of a full-width banner, a two-line date badge, dotted world-map motif, twin-slashed gold headline bands, tall rounded `NEWS IMAGE` panels, and a diamond separator. The exact supplied monogram remains at top and bottom, and the smaller top section leaves clean space below the bottom monogram for the operator byline **By - Abu Aimal and Aimal Akram**.
+`verify-pixabay.yml` run `40642038560` (commit `caa8296`) completed with conclusion **success**:
 
-- Card: `data/cards/reference-faithful-demo-1.png`
-- Dimensions: 1080×1350
-- Visual inspection: `passed`
-- `media_count`: `2`
-- `heading_box`: `(35, 166, 700, 248)` — narrow ribbon check passed
-- Photo checks: `photo_1_pixels=true`, `photo_2_pixels=true`
-- Byline check: `byline_pixels=true`
-- Exact supplied monogram: `true`
+- Pixabay key configured: **true** (`pixabay_available: true`; the key itself is a write-only Actions secret and was never printed)
+- Safe-search query: `education exam students`
+- Search results used: 2; downloaded locally: 2 (no hotlinking)
+- Rendered card: `data/cards/pixabay-demo-20261028T060842-1.png` (1080×1350)
+- Audit: `data/audit/pixabay-demo-20261028T060842-1.json`
+- Visual inspection: **passed** — `photo_1_pixels`, `photo_2_pixels`, `byline_pixels`, `exact_logo_asset`, and `narrow_latest_news_ribbon` all true
+- `heading_box`: `[35, 166, 700, 248]` (narrow angled ribbon per the supplied reference)
+- Byline on card: **By - Abu Aimal and Aimal Akram**
 
-The local placeholders say `LAYOUT DEMO — NOT A NEWS PHOTO`; they are not intended for publication. Production cards use source-supplied rights-cleared photos first, then relevant Pixabay Content License photos downloaded locally through the documented API. If no relevant licensed photo is found, the renderer uses a clean text-led card.
+## Photo credits (Pixabay Content License)
 
-A live demo with real Pixabay safe-search results and credits is produced by `verify-pixabay.yml` after the new commit is pushed. The Pixabay API key remains a write-only GitHub Actions secret and is never printed or committed.
+- Pixabay / silviarita — https://pixabay.com/service/terms/ (student studying with books)
+- Pixabay / Alexas_Fotos — https://pixabay.com/service/terms/ (books and chalkboard)
+
+Two bugs were found and fixed by this live verification:
+
+1. Pixabay matches every query term, so specific story phrases returned 0 hits. `PixabayClient.search()` now relaxes an empty-result query to its leading 3, then 2, terms.
+2. The size filter judged photos by the 640px `webformat` preview, discarding every usable image. It now judges by the full image dimensions used for the `largeImageURL` download.
+
+Pixabay images are topical stock illustrations under the Pixabay Content License; they are not presented as photographs of the specific event. If no relevant licensed photo is found, production cards fall back to a clean text-led design. This demo card was **not** published to Facebook or Instagram.
