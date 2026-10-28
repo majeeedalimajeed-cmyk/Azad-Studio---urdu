@@ -200,6 +200,29 @@ class Config:
     munsif_rss: str = "https://munsifdaily.com/feed/"
     etemaad_urdu_home: str = "https://www.etemaaddaily.com/index.php"
     indian_express_rss: str = "https://indianexpress.com/feed/"
+    # Preferred national dailies, monitored section-first so Hyderabad /
+    # Telangana, politics, India and world stories arrive pre-labelled with
+    # the desk section that drives the editorial priority ranking.
+    # (Indian Express section feeds are tried first; the general feed remains
+    # as fallback because the section endpoints intermittently return 403.)
+    indian_express_feeds: tuple[tuple[str, str], ...] = (
+        ("telangana", "https://indianexpress.com/section/cities/Hyderabad/feed/"),
+        ("india", "https://indianexpress.com/section/india/feed/"),
+        ("politics", "https://indianexpress.com/section/political-pulse/feed/"),
+        ("world", "https://indianexpress.com/section/world/feed/"),
+        ("general", "https://indianexpress.com/feed/"),
+    )
+    hindu_feeds: tuple[tuple[str, str], ...] = (
+        ("telangana", "https://www.thehindu.com/news/national/Telangana/feeder/default.rss"),
+        ("hyderabad", "https://www.thehindu.com/news/cities/Hyderabad/feeder/default.rss"),
+        ("india", "https://www.thehindu.com/news/national/feeder/default.rss"),
+        ("politics", "https://www.thehindu.com/elections/feeder/default.rss"),
+        ("world", "https://www.thehindu.com/news/international/feeder/default.rss"),
+    )
+    india_today_feeds: tuple[tuple[str, str], ...] = (
+        ("india", "https://www.indiatoday.in/rss/india"),
+        ("general", "https://www.indiatoday.in/rss/home"),
+    )
     wire_api: str = "https://cms.thewire.in/wp-json/wp/v2/posts"
     user_agent: str = "NRNewsBot/1.0 (+dry-run newsroom; contact: operator)"
     request_timeout: int = int(os.getenv("NR_HTTP_TIMEOUT", "20"))

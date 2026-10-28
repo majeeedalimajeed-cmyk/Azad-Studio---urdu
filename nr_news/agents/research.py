@@ -67,27 +67,45 @@ class ResearchAgent:
         self.llm = llm or LLMClient(config)
         self.config = config
 
+    # Sources the desk wants first for Hyderabad/Telangana, India and world.
+    PREFERRED_PUBLISHERS = ("The Hindu", "The Indian Express", "India Today")
+
     @staticmethod
     def priority(candidate: Candidate) -> int:
-        """Rank regional politics first, then national/international politics, then development."""
-        text = candidate.original_headline + " " + candidate.body_excerpt + " " + candidate.url
+        """Editorial order: Hyderabad/Telangana first, then politics, then
+        India/world, then other public-interest news. Stories from the
+        preferred national dailies get a small tie-break boost."""
+        text = " ".join([
+            candidate.original_headline, candidate.body_excerpt, candidate.url,
+            candidate.category or "", candidate.publisher or "",
+        ])
         regional = bool(PRIORITY_PATTERNS["regional"].search(text))
-        political = bool(PRIORITY_PATTERNS["political"].search(text))
+        # Politics is judged from the story itself plus an explicit desk
+        # section (politics/elections) — a generic category word such as
+        # "government" must not promote an education notice over world news.
+        section = (candidate.category or "").split(",")[0].strip().lower()
+        political = bool(PRIORITY_PATTERNS["political"].search(
+            candidate.original_headline + " " + candidate.body_excerpt + " " + candidate.url
+        )) or section in {"politics", "political pulse", "political-pulse", "elections"}
         international = bool(PRIORITY_PATTERNS["international"].search(text))
         development = bool(PRIORITY_PATTERNS["development"].search(text))
         if regional and political:
-            return 12
-        if political and not international:
-            return 10
-        if political and international:
-            return 9
-        if regional:
-            return 8
-        if development:
-            return 6
-        if international:
-            return 4
-        return 1
+            score = 15
+        elif regional:
+            score = 13
+        elif political and not international:
+            score = 12
+        elif political and international:
+            score = 11
+        elif international:
+            score = 8
+        elif development:
+            score = 6
+        else:
+            score = 1
+        if candidate.publisher in ResearchAgent.PREFERRED_PUBLISHERS:
+            score += 1
+        return score
 
     def ingest(self, source_results: list[SourceResult], mode: str) -> list[str]:
         """Persist candidates and enqueue immediate verification for new items."""

@@ -83,14 +83,17 @@ def _rss_items(xml_text: str, limit: int) -> list[dict[str, Any]]:
     return items
 
 
-def _rss_candidates(items: list[dict[str, Any]], source: str, publisher: str, language: str) -> list[Candidate]:
+def _rss_candidates(items: list[dict[str, Any]], source: str, publisher: str, language: str,
+                    section: str = "") -> list[Candidate]:
     result: list[Candidate] = []
     for item in items:
         url = item["link"] or item["guid"]
         if not url or not item["title"]:
             continue
         body = clean_text(item["encoded"] or item["description"], 1800)
-        category = ", ".join(item["categories"][:5])
+        # The desk section is kept as the first category: it is what the
+        # editorial priority ranking reads (telangana/hyderabad/politics/…).
+        category = ", ".join(([section] if section else []) + item["categories"][:4])
         result.append(Candidate(
             source=source,
             publisher=publisher,
@@ -124,6 +127,8 @@ class SourceMonitor:
         results = [
             self._munsif(limit),
             self._etemaad_urdu(limit),
+            self._hindu(limit),
+            self._india_today(limit),
             self._indian_express(limit),
             self._the_wire(limit),
         ]
@@ -150,32 +155,71 @@ class SourceMonitor:
         except ET.ParseError as exc:
             return SourceResult("munsif_daily", False, message=f"RSS parse error: {exc}", http_status=r.status_code)
 
+    def _multi_feed(self, source: str, publisher: str,
+                    feeds: tuple[tuple[str, str], ...], per_feed_limit: int) -> SourceResult:
+        """Aggregate a publisher's section RSS feeds into one source result.
+
+        Every candidate keeps its desk section as its first category so the
+        editorial ranking can put Hyderabad/Telangana and politics first.
+        A feed that fails (e.g. an intermittent 403) never sinks the source:
+        the source is healthy if at least one section answered."""
+        candidates: list[Candidate] = []
+        seen: set[str] = set()
+        ok_feeds = 0
+        last_status = None
+        failures: list[str] = []
+        for section, url in feeds:
+            r = self.client.get(url)
+            last_status = r.status_code or last_status
+            if not r.ok:
+                failures.append(section)
+                continue
+            try:
+                items = _rss_items(r.text, per_feed_limit)
+            except ET.ParseError:
+                failures.append(section)
+                continue
+            ok_feeds += 1
+            for candidate in _rss_candidates(items, source, publisher, "en", section=section):
+                key = canonical_url(candidate.url)
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(candidate)
+        message = f"{ok_feeds}/{len(feeds)} section feeds fetched"
+        if failures:
+            message += f"; unavailable: {', '.join(failures)}"
+        return SourceResult(source, ok_feeds > 0, len(candidates), message, last_status, candidates)
+
+    def _hindu(self, limit: int) -> SourceResult:
+        return self._multi_feed("the_hindu", "The Hindu", self.config.hindu_feeds,
+                                max(6, limit // 2))
+
+    def _india_today(self, limit: int) -> SourceResult:
+        return self._multi_feed("india_today", "India Today", self.config.india_today_feeds,
+                                max(6, limit // 2))
+
     def _indian_express(self, limit: int) -> SourceResult:
-        r = self.client.get(self.config.indian_express_rss)
-        text = r.text
-        message = r.message
-        status = r.status_code
-        snapshot = False
-        if not r.ok:
-            snapshot_path = self.config.snapshot_dir / "indian_express_feed.xml"
-            if snapshot_path.exists():
-                text = snapshot_path.read_text(encoding="utf-8")
-                message = f"{message}; using clearly marked non-publishable snapshot for monitoring"
-                snapshot = True
-                status = None
-            else:
-                return SourceResult("indian_express", False, message=r.message, http_status=r.status_code)
+        result = self._multi_feed("indian_express", "The Indian Express",
+                                  self.config.indian_express_feeds, max(6, limit // 2))
+        if result.candidates:
+            return result
+        # Fall back to the clearly-marked monitoring snapshot, as before.
+        snapshot_path = self.config.snapshot_dir / "indian_express_feed.xml"
+        if not snapshot_path.exists():
+            return result
         try:
-            items = _rss_items(text, limit)
-            candidates = _rss_candidates(items, "indian_express", "The Indian Express", "en")
-            if snapshot:
-                for c in candidates:
-                    c.raw["snapshot_only"] = True
-                    c.raw["reason"] = "direct feed inaccessible from host; original article must be re-read before publication"
-            # An outage is still reported to operations even if a snapshot is parsed.
-            return SourceResult("indian_express", not snapshot, len(candidates), message, status, candidates)
+            items = _rss_items(snapshot_path.read_text(encoding="utf-8"), limit)
         except ET.ParseError as exc:
-            return SourceResult("indian_express", False, message=f"RSS parse error: {exc}", http_status=status)
+            return SourceResult("indian_express", False, message=f"RSS parse error: {exc}")
+        candidates = _rss_candidates(items, "indian_express", "The Indian Express", "en")
+        for c in candidates:
+            c.raw["snapshot_only"] = True
+            c.raw["reason"] = "direct feed inaccessible from host; original article must be re-read before publication"
+        # An outage is still reported to operations even if a snapshot is parsed.
+        return SourceResult("indian_express", False, len(candidates),
+                            f"{result.message}; using clearly marked non-publishable snapshot for monitoring",
+                            None, candidates)
 
     def _the_wire(self, limit: int) -> SourceResult:
         params = {

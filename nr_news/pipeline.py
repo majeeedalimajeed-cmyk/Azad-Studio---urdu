@@ -130,10 +130,32 @@ class NewsPipeline:
         (e.g. it errored after rendering). Idempotency keys in the publisher
         make this safe against duplicates."""
         results: list[dict[str, Any]] = []
-        editorials = self.db.query(
-            "SELECT * FROM editorials WHERE status='approved' ORDER BY created_at ASC LIMIT ?",
-            (limit,),
-        )
+        # Rank by editorial priority (Hyderabad/Telangana, then politics,
+        # then India/world, preferring The Hindu / Indian Express /
+        # India Today) and freshness — never oldest-backlog-first.
+        approved = self.db.query("SELECT * FROM editorials WHERE status='approved'", ())
+
+        def _rank(editorial: dict[str, Any]) -> tuple[int, str]:
+            candidate_row = self.db.get_candidate(editorial["candidate_id"]) or {}
+            try:
+                probe = Candidate(
+                    source=candidate_row.get("source", ""),
+                    publisher=candidate_row.get("publisher", ""),
+                    url=candidate_row.get("url", ""),
+                    original_headline=candidate_row.get("original_headline", ""),
+                    published_at=candidate_row.get("published_at"),
+                    updated_at=candidate_row.get("updated_at"),
+                    language=candidate_row.get("language", "en"),
+                    body_excerpt=candidate_row.get("body_excerpt", ""),
+                    category=candidate_row.get("category", ""),
+                )
+                score = ResearchAgent.priority(probe)
+            except Exception:
+                score = 0
+            fresh = candidate_row.get("published_at") or editorial.get("created_at") or ""
+            return (score, fresh)
+
+        editorials = sorted(approved, key=_rank, reverse=True)[:limit]
         for editorial in editorials:
             success = self.db.one(
                 "SELECT id FROM publish_attempts WHERE editorial_id=? AND status='success'",
