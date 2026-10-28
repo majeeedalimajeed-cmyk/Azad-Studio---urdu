@@ -126,6 +126,13 @@ STORIES: list[EditorialContent] = [
 
 def main() -> None:
     out_dir = Path(__file__).parent / "bulletin_output" / "2026-10-28"
+    # Relevant freely-licensed story photos (fetch_bulletin_photos.py);
+    # any story without a fetched photo keeps the branded fallback.
+    photo_dir = out_dir / "photos"
+    for i, story in enumerate(STORIES, 1):
+        photo = photo_dir / f"story{i}.jpg"
+        if photo.exists():
+            story.media = [{"local_path": str(photo)}]
     result = build_bulletin(STORIES, out_dir, config=CONFIG)
     (out_dir / "bulletin_meta.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
