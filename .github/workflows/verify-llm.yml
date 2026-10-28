@@ -95,6 +95,46 @@ jobs:
                   except Exception as exc:
                       print("grok chat", model, "network error", type(exc).__name__)
 
+          if grok_key:
+              # The operator's key may be a Groq (groq.com, prefix gsk_) key
+              # rather than an xAI Grok (xai-) key. Probe the Groq
+              # OpenAI-compatible endpoint so the gateway can be repointed.
+              groq_base = "https://api.groq.com/openai/v1"
+              groq_chat_ok = False
+              try:
+                  r = requests.get(
+                      groq_base + "/models",
+                      headers={"Authorization": "Bearer " + grok_key},
+                      timeout=30,
+                  )
+                  print("GROK_API_KEY", groq_base, "models HTTP", r.status_code,
+                        safe(r.text, grok_key))
+                  if r.status_code == 200:
+                      ids = [m.get("id") for m in r.json().get("data", [])]
+                      print("groq model ids:", ids[:40])
+              except Exception as exc:
+                  print("GROK_API_KEY", groq_base, "network error", type(exc).__name__)
+              for model in ["llama-3.3-70b-versatile", "openai/gpt-oss-120b",
+                            "llama-3.1-8b-instant"]:
+                  try:
+                      r = requests.post(
+                          groq_base + "/chat/completions",
+                          headers={"Authorization": "Bearer " + grok_key},
+                          json={"model": model,
+                                "messages": [{"role": "user", "content": "Reply with the single word OK."}],
+                                "max_tokens": 5},
+                          timeout=60,
+                      )
+                      print("groq chat", model, "HTTP", r.status_code,
+                            safe(r.text, grok_key))
+                      if r.status_code == 200:
+                          groq_chat_ok = True
+                          any_ok = True
+                          print("GROQ_MODEL_OK", model)
+                  except Exception as exc:
+                      print("groq chat", model, "network error", type(exc).__name__)
+              print("GROQ_CHAT_OK", groq_chat_ok)
+
           openai_key = keys.get("OPENAI_API_KEY")
           if openai_key:
               base = "https://api.openai.com/v1"
