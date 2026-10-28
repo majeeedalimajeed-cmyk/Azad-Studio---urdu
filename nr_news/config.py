@@ -155,6 +155,21 @@ class Config:
     instagram_enabled: bool = field(default_factory=lambda: _bool("NR_INSTAGRAM_ENABLED", True))
     instagram_user_id: str | None = field(
         default_factory=lambda: os.getenv("NR_INSTAGRAM_USER_ID") or None)
+
+    # YouTube Shorts (optional). Upload uses OAuth2 refresh-token flow via the
+    # YouTube Data API v3; TTS reads the Urdu copy only, male voice by default.
+    youtube_enabled: bool = field(default_factory=lambda: _bool("NR_YOUTUBE_ENABLED", True))
+    youtube_client_id: str | None = field(default_factory=lambda: _first_secret(
+        "NR_YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_ID"))
+    youtube_client_secret: str | None = field(default_factory=lambda: _first_secret(
+        "NR_YOUTUBE_CLIENT_SECRET", "YOUTUBE_CLIENT_SECRET"))
+    youtube_refresh_token: str | None = field(default_factory=lambda: _first_secret(
+        "NR_YOUTUBE_REFRESH_TOKEN", "YOUTUBE_REFRESH_TOKEN"))
+    youtube_privacy: str = field(
+        default_factory=lambda: os.getenv("NR_YOUTUBE_PRIVACY", "public"))
+    tts_voice: str = field(
+        default_factory=lambda: os.getenv("NR_TTS_VOICE", "ur-PK-AsadNeural"))
+    tts_rate: str = field(default_factory=lambda: os.getenv("NR_TTS_RATE", "-5%"))
     pixabay_per_page: int = int(os.getenv("NR_PIXABAY_PER_PAGE", "3"))
     pixabay_min_width: int = int(os.getenv("NR_PIXABAY_MIN_WIDTH", "800"))
     pixabay_min_height: int = int(os.getenv("NR_PIXABAY_MIN_HEIGHT", "600"))
@@ -204,7 +219,8 @@ class Config:
         values = [
             self.llm_api_key, self.facebook_user_token,
             self.facebook_page_token, self.admin_token,
-            self.pixabay_api_key,
+            self.pixabay_api_key, self.youtube_client_secret,
+            self.youtube_refresh_token,
         ]
         return tuple(v for v in values if v)
 

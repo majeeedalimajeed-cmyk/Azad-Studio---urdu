@@ -31,3 +31,9 @@ Command: `python3 -m pytest -q tests`
 | PASS | API results, errors and retries are recorded | Graph API errors, publish attempts, post IDs, source URLs and job retries are logged; success always requires an API post ID. |
 
 Live publishing remains disabled until operator approval, all safety flags, and an operator-approved test post are confirmed, even when Page identity is API-verified.
+
+## YouTube Shorts (male Urdu TTS → 9:16 MP4 → Data API v3)
+- `nr_news/shorts.py`: Urdu-only narration script (Urdu headline + bullets verbatim, Roman/English excluded), edge-tts `ur-PK-AsadNeural` male voice (-5% rate), 1080×1920 H.264/AAC Short builder (blurred backdrop + centered card + slow zoom), YouTube Data API v3 client (refresh-token OAuth, resumable upload, category 25, no URLs in title/description), duplicate-safe video workflow integration.
+- Tests: 36 passed (`test_urdu_script_excludes_roman_urdu`, `test_youtube_upload_uses_refresh_token_flow`, `test_build_short_produces_vertical_mp4`).
+- CLI `shorts-demo` verified end-to-end (27.7s narration, `data/videos/shorts-demo/short.mp4`). Manual demo from a live card: `data/videos/stanfest-short.mp4` (30.6s).
+- Upload stays OFF until OAuth credentials are stored as Actions secrets (`YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`) and `NR_VIDEO_ENABLED=true`.

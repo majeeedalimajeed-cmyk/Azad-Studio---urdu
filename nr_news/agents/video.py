@@ -56,7 +56,7 @@ class VideoWorkflow:
             "visuals": "approved licensed photograph only; otherwise card artwork",
             "subtitle_file": "subtitles_bilingual.srt",
             "narration": "Urdu only by default; Urdu followed by Roman Urdu is supported",
-            "tts_status": "not_configured" if not self.config.llm_api_key else "provider_not_implemented",
+            "tts_status": f"edge-tts {self.config.tts_voice} (Urdu only)",
             "music": "none; add licensed track only after rights review",
             "publication_ready": False,
         }
@@ -64,4 +64,52 @@ class VideoWorkflow:
         self.db.insert_api_event("video", "prepare", "review",
                                  "Video scripts and bilingual subtitles prepared; no audio/video published.",
                                  details={"editorial_id": editorial_id, "directory": str(out_dir)})
-        return {"directory": str(out_dir), **storyboard}
+        result: dict[str, Any] = {"directory": str(out_dir), **storyboard}
+
+        # Build the actual Short (Urdu-only male TTS) from the rendered card,
+        # and upload it to YouTube when the story is live and OAuth is set.
+        try:
+            from ..shorts import (ShortUnavailable, YouTubeClient, build_short,
+                                  youtube_description, youtube_title)
+            card = self.db.one(
+                "SELECT * FROM cards WHERE editorial_id=? AND visual_status='passed' "
+                "ORDER BY page_number LIMIT 1", (editorial_id,))
+            if card and Path(card["file_path"]).exists():
+                built = build_short(Path(card["file_path"]), content, out_dir,
+                                    config=self.config)
+                result.update({"video_path": built["video_path"],
+                               "duration_seconds": built["duration_seconds"],
+                               "voice": built["voice"],
+                               "publication_ready": True})
+                self.db.insert_api_event(
+                    "video", "build_short", "ok",
+                    "1080x1920 Short built with Urdu-only narration.",
+                    details={"editorial_id": editorial_id, **built})
+                editorial = self.db.get_editorial(editorial_id) or {}
+                youtube = YouTubeClient(config=self.config)
+                if (editorial.get("status") == "published" and youtube.available
+                        and self.config.youtube_enabled and not self.config.dry_run):
+                    if not self.db.get_setting(f"youtube_video_for_{editorial_id}"):
+                        uploaded = youtube.upload_short(
+                            Path(built["video_path"]),
+                            title=youtube_title(content),
+                            description=youtube_description(content),
+                        )
+                        self.db.set_setting(
+                            f"youtube_video_for_{editorial_id}", uploaded["video_id"])
+                        self.db.insert_api_event(
+                            "youtube", "upload", "success",
+                            "YouTube Short published.", http_status=200,
+                            details={"editorial_id": editorial_id, **uploaded})
+                        result["youtube"] = {"status": "success", **uploaded}
+                    else:
+                        result["youtube"] = {"status": "already_uploaded"}
+            else:
+                result["short_status"] = "no_card_available"
+        except Exception as exc:  # video must never block card publishing
+            from ..shorts import ShortUnavailable  # noqa: F401
+            message = f"{type(exc).__name__}: {exc}"
+            self.db.insert_api_event("video", "build_short", "error", message,
+                                     details={"editorial_id": editorial_id})
+            result["short_error"] = message
+        return result

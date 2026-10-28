@@ -37,6 +37,11 @@ jobs:
       NR_PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       NR_PIXABAY_ENABLED: ${{ vars.NR_PIXABAY_ENABLED || 'true' }}
       NR_INSTAGRAM_ENABLED: ${{ vars.NR_INSTAGRAM_ENABLED || 'true' }}
+      NR_VIDEO_ENABLED: ${{ vars.NR_VIDEO_ENABLED || 'false' }}
+      NR_YOUTUBE_ENABLED: ${{ vars.NR_YOUTUBE_ENABLED || 'true' }}
+      NR_YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      NR_YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      NR_YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +51,7 @@ jobs:
           cache: pip
 
       - name: Install RTL runtime dependency
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libraqm0
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libraqm0 ffmpeg
 
       - name: Install Python dependencies
         run: |

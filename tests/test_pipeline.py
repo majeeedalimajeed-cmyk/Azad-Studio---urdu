@@ -644,6 +644,90 @@ def test_publish_approved_pending_retries_unpublished_editorial(tmp_path):
     assert pipeline.publish_approved_pending()[0]["status"] == "dry_run"
 
 
+def test_urdu_script_reads_urdu_only():
+    from nr_news.shorts import urdu_script
+
+    content = EditorialContent(
+        urdu_headline="اردو سرخی یہاں ہے",
+        urdu_bullets=["پہلا نکتہ", "دوسرا نکتہ"],
+        roman_headline="Roman headline should not be read",
+        roman_bullets=["Roman point should not be read"],
+        verification_notes=[], source_urls=[], publication_time=iso(), media=None,
+    )
+    script = urdu_script(content)
+    assert "اردو سرخی" in script and "پہلا نکتہ" in script
+    assert "Roman" not in script
+
+
+def test_youtube_upload_uses_refresh_token_flow(tmp_path):
+    from nr_news.shorts import YouTubeClient
+
+    cfg = temp_config(tmp_path, youtube_client_id="cid", youtube_client_secret="csecret",
+                      youtube_refresh_token="rtoken")
+    video = tmp_path / "short.mp4"
+    video.write_bytes(b"fake-mp4")
+
+    class FakeResp:
+        def __init__(self, status=200, payload=None, headers=None):
+            self.status_code = status
+            self._payload = payload or {}
+            self.headers = headers or {}
+            self.text = "{}"
+
+        def json(self):
+            return self._payload
+
+    class FakeSession:
+        def __init__(self):
+            self.posts = []
+
+        def post(self, url, data=None, params=None, headers=None, timeout=None):
+            self.posts.append(url)
+            if "oauth2" in url:
+                assert data["grant_type"] == "refresh_token"
+                return FakeResp(payload={"access_token": "ya29.test"})
+            return FakeResp(payload={}, headers={"location": "https://upload.example/session"})
+
+        def put(self, url, headers=None, data=None, timeout=None):
+            assert url == "https://upload.example/session"
+            return FakeResp(status=201, payload={"id": "VID123"})
+
+    session = FakeSession()
+    out = YouTubeClient(config=cfg, session=session).upload_short(
+        video, title="Test #Shorts", description="desc")
+    assert out["video_id"] == "VID123"
+    assert out["url"] == "https://www.youtube.com/shorts/VID123"
+
+
+def test_build_short_produces_vertical_mp4(tmp_path, monkeypatch):
+    from nr_news import shorts
+
+    cfg = temp_config(tmp_path)
+    content = EditorialContent(
+        urdu_headline="اردو سرخی", urdu_bullets=["ایک", "دو", "تین"],
+        roman_headline="Roman headline", roman_bullets=["one", "two", "three"],
+        verification_notes=[], source_urls=[], publication_time=iso(), media=None,
+    )
+    card = tmp_path / "card.png"
+    Image.new("RGB", (1080, 1350), (10, 10, 10)).save(card)
+
+    def fake_tts(text, voice, rate, out_path):
+        import wave
+        with wave.open(str(out_path), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(22050)
+            wav.writeframes(b"\x00\x00" * 22050)
+        return out_path
+
+    monkeypatch.setattr(shorts, "synthesize_tts", fake_tts)
+    monkeypatch.setattr(shorts, "audio_duration", lambda p: 2.0)
+    built = shorts.build_short(card, content, tmp_path / "out", config=cfg)
+    video = Path(built["video_path"])
+    assert video.exists() and video.stat().st_size > 10_000
+    assert built["duration_seconds"] == 2.0
+
+
 def test_single_source_substantial_report_verifies_but_claims_hold(tmp_path):
     cfg = temp_config(tmp_path)
     db = Database(cfg.db_path)

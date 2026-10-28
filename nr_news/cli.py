@@ -353,6 +353,36 @@ def cmd_pixabay_demo(args) -> int:
     return 0 if media else 2
 
 
+def cmd_shorts_demo(args) -> int:
+    """Build a YouTube Short (Urdu-only male TTS) from the fixture card."""
+    from .shorts import YouTubeClient, build_short, youtube_description, youtube_title
+
+    CONFIG.ensure_dirs()
+    fixture, content = _fixture_editorial(args)
+    cards = CardRenderer(CONFIG).render_cards(content, "shorts-demo", media=None)
+    if not cards:
+        print(json_dumps({"ok": False, "reason": "card_render_failed"}))
+        return 2
+    out_dir = CONFIG.data_dir / "videos" / "shorts-demo"
+    built = build_short(Path(cards[0].path), content, out_dir, config=CONFIG)
+    result: dict = {"ok": True, "card": cards[0].path, **built}
+    if args.upload:
+        youtube = YouTubeClient(config=CONFIG)
+        if not youtube.available:
+            result["youtube"] = {"status": "unavailable",
+                                 "reason": "Set NR_YOUTUBE_CLIENT_ID, NR_YOUTUBE_CLIENT_SECRET, NR_YOUTUBE_REFRESH_TOKEN"}
+            print(json_dumps(result))
+            return 2
+        uploaded = youtube.upload_short(
+            Path(built["video_path"]),
+            title=youtube_title(content),
+            description=youtube_description(content),
+        )
+        result["youtube"] = {"status": "success", **uploaded}
+    print(json_dumps(result))
+    return 0
+
+
 def cmd_verify_pixabay(args) -> int:
     client = PixabayClient(config=CONFIG)
     query = args.query or "Telangana government education exam"
@@ -489,6 +519,12 @@ def build_parser() -> argparse.ArgumentParser:
     pixabay_demo.add_argument("--limit", type=int, default=2)
     pixabay_demo.add_argument("--output", default=str(ROOT / "reports/PIXABAY_DEMO.md"))
     pixabay_demo.set_defaults(func=cmd_pixabay_demo)
+
+    shorts_demo = sub.add_parser("shorts-demo")
+    shorts_demo.add_argument("--fixture", default=str(ROOT / "tests/fixtures/verified_tgpsc_story.json"))
+    shorts_demo.add_argument("--upload", action="store_true",
+                             help="Also upload to YouTube when OAuth secrets are configured")
+    shorts_demo.set_defaults(func=cmd_shorts_demo)
     verify_pixabay = sub.add_parser("verify-pixabay")
     verify_pixabay.add_argument("--query", default=None)
     verify_pixabay.set_defaults(func=cmd_verify_pixabay)
