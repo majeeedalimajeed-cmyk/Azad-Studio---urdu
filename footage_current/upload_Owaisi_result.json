@@ -1,0 +1,5 @@
+{
+  "status": "failed",
+  "video": "Owaisi",
+  "reason": "YouTube upload init failed: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"The user has exceeded the number of videos they may upload.\",\n    \"errors\": [\n      {\n        \"message\": \"The user has exceeded the number of videos they may upload.\",\n        \"domain\": \"youtube.video\",\n        \"reason\": \"up"
+}
