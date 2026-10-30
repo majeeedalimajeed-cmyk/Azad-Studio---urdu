@@ -86,3 +86,14 @@ Blocking: operator (human) approval + rights confirmation. Video file:
   retries; retry the corrected file when the limit resets.
 - Status remains NEEDS REVIEW until the corrected version is live
   and the operator confirms.
+
+## Layout v3 + standing post instruction (30 Oct 2026)
+- Operator: date + New Delhi stay on TOP (top-left, line 1 only);
+  the second (credit) line moves to the BOTTOM, just above the
+  ticker strip. Done in builder (credit at LH-TICKER_H-44, subtitle
+  bottom_pad raised to 64) and video REBUILT; QA frame verified.
+- Operator standing instruction: post Revanth + Owaisi videos
+  PUBLIC on the channel as soon as the YouTube quota resets.
+  One public attempt after this rebuild FAILED again with the same
+  daily-limit message (quota not yet reset on 30 Oct). Retry once
+  when the limit resets; do not loop.

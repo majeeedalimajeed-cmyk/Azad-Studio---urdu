@@ -158,8 +158,12 @@ def make_overlay_landscape(headline: str, speaker: str, date: str,
         df = renderer._font(False, 26, "SemiBold")
         shadow_text((50, 86), date, df, (228, 232, 242, 255), "la")
     if credit:
-        cf = renderer._font(False, 22, "Medium")
-        shadow_text((50, 122), credit, cf, (200, 206, 220, 230), "la")
+        # Operator (30 Oct): date stays on top; the second (credit)
+        # line goes at the bottom, just above the ticker strip.
+        # Subtitle band bottom_pad is raised to clear this line.
+        cf = renderer._font(False, 21, "Medium")
+        shadow_text((50, LH - TICKER_H - 44), credit, cf,
+                    (200, 206, 220, 230), "la")
     if ticker:
         _draw_ticker_bar(d, LW, LH)
     im.save(out)
@@ -274,7 +278,7 @@ def make_subtitle_video(srt_path: Path, work: Path, duration: float,
     if landscape:
         cues = make_subtitle_pngs(srt_path, work, width=LW,
                                   band_h=LS_SUB_BAND_H, font_size=48,
-                                  wrap_w=1700, bottom_pad=20)
+                                  wrap_w=1700, bottom_pad=64)
         width, band_h = LW, LS_SUB_BAND_H
     else:
         cues = make_subtitle_pngs(srt_path, work)

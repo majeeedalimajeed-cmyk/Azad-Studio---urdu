@@ -72,3 +72,9 @@ Blocking: operator (human) approval + rights confirmation. Video file:
   "Asaduddin Owaisi". QA sheet verified. Upload still pending:
   YouTube's daily upload limit was hit on 30 Oct 2026; upload once
   when the limit resets, then operator check before going public.
+
+## Layout v3 (30 Oct 2026)
+- Same operator layout applied: date on top (line 1 only), credit
+  line moved to bottom just above the ticker strip; rebuilt and
+  QA-verified. Standing instruction: post PUBLIC with the Revanth
+  video as soon as the YouTube daily quota resets.
