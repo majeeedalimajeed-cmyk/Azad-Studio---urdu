@@ -38,3 +38,15 @@ the number of daily videos increases beyond three.
 - `session_video.py <session.json>` — any dated morning/evening/breaking
   session (see `sessions/`), with dedup + photo fetch built in.
 - `bulletin_2026-10-28.py` — the long-form bulletin pattern.
+
+## Real-footage political videos (adopted 29 Oct 2026)
+
+Political packages are now built primarily from **authentic footage**
+of politicians speaking (parliament, press conferences, rallies,
+interviews), under `FOOTAGE_PROTOCOL.md`: original voice only (no AI
+anchor over speech), 9:16 vertical, Urdu subtitles checked word by
+word, verified speaker/event/date, rights checked and recorded, and
+a completed review report (`footage_review_template.md`) with human
+approval before anything is published. **Nothing auto-publishes.**
+Builder: `footage_clip.py` (rights-cleared local file + exact
+timestamps in, packaged vertical out).
