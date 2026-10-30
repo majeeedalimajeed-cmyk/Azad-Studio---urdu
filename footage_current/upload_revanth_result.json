@@ -1,7 +1,5 @@
 {
-  "status": "success",
+  "status": "failed",
   "video": "revanth",
-  "video_id": "Aip5GkboJDs",
-  "watch_url": "https://www.youtube.com/watch?v=Aip5GkboJDs",
-  "privacy": "unlisted"
+  "reason": "YouTube upload init failed: {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"The user has exceeded the number of videos they may upload.\",\n    \"errors\": [\n      {\n        \"message\": \"The user has exceeded the number of videos they may upload.\",\n        \"domain\": \"youtube.video\",\n        \"reason\": \"up"
 }

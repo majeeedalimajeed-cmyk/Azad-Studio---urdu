@@ -71,3 +71,18 @@ Blocking: operator (human) approval + rights confirmation. Video file:
 
 ## Human approval
 - Approved by:  Date:
+
+## Operator feedback & re-upload (30 Oct 2026)
+- Operator: remove the top headline strap (it sat on the speaker's
+  face/head) — bottom ticker only; correct the name to
+  **Revanth Reddy**. Builder landscape overlay redesigned (slim brand
+  bar + small corner labels, no top strap) and video REBUILT.
+  QA frames verified: head fully clear, Urdu subtitles + ticker good,
+  on-screen name renders "Revanth Reddy".
+- Operator said to post. Public upload attempted ONCE on 30 Oct 2026:
+  FAILED — YouTube: "The user has exceeded the number of videos they
+  may upload." (daily channel limit; earlier unlisted check copy is
+  `Aip5GkboJDs`, now superseded by the corrected file). Do NOT loop
+  retries; retry the corrected file when the limit resets.
+- Status remains NEEDS REVIEW until the corrected version is live
+  and the operator confirms.

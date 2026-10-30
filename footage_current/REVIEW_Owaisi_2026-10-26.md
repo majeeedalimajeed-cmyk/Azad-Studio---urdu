@@ -65,3 +65,10 @@ Blocking: operator (human) approval + rights confirmation. Video file:
 
 ## Human approval
 - Approved by:  Date:
+
+## Layout rebuild (30 Oct 2026)
+- Rebuilt with the new clean landscape overlay (no top strap; slim
+  brand bar + corner labels + bottom ticker only), speaker label
+  "Asaduddin Owaisi". QA sheet verified. Upload still pending:
+  YouTube's daily upload limit was hit on 30 Oct 2026; upload once
+  when the limit resets, then operator check before going public.

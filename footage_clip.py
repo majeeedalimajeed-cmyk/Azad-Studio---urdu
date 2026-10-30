@@ -114,46 +114,52 @@ def make_overlay_landscape(headline: str, speaker: str, date: str,
                            ticker: bool = False) -> Path:
     """Landscape static furniture for 1920x1080.
 
-    Top strap carries brand + headline + speaker/date; bottom carries
-    subtitles (separate band) and the scrolling ticker bar.
+    Operator feedback (30 Oct): NO headline strap across the top —
+    it sat on the speaker's face/head. Only ONE strip is kept (the
+    bottom scrolling ticker). Top carries just a slim brand bar plus
+    small speaker/date corner labels over the backdrop; the headline
+    lives in the video title/ticker, subtitles sit above the ticker.
     """
     renderer = CardRenderer(CONFIG)
     logo = load_logo()
     im = Image.new("RGBA", (LW, LH), (0, 0, 0, 0))
     d = ImageDraw.Draw(im, "RGBA")
 
-    # Brand bar
-    d.rectangle((0, 0, LW, 84), fill=(6, 8, 16, 235))
-    d.rectangle((0, 84, LW, 88), fill=(226, 184, 74, 255))
-    scaled = proportional_logo(logo, 62)
-    im.paste(scaled, (36, 11), scaled)
-    brand_f = renderer._font(False, 36, "Bold")
-    d.text((36 + scaled.width + 20, 42), "AZAD STUDIO", font=brand_f,
+    # Slim brand bar only (64px) — clear of the speaker's head.
+    d.rectangle((0, 0, LW, 64), fill=(6, 8, 16, 235))
+    d.rectangle((0, 64, LW, 67), fill=(226, 184, 74, 255))
+    scaled = proportional_logo(logo, 46)
+    im.paste(scaled, (30, 9), scaled)
+    brand_f = renderer._font(False, 30, "Bold")
+    d.text((30 + scaled.width + 16, 32), "AZAD STUDIO", font=brand_f,
            fill=(255, 231, 151, 255), anchor="lm")
 
-    # Headline strap (semi-transparent) with speaker + date under it.
-    d.rectangle((0, 96, LW, 292), fill=(4, 6, 12, 165))
-    fnt = renderer._font(True, 54, "Bold")
-    lines = renderer.wrap(d, headline, fnt, 1760, True)
-    y = 108
-    for line in lines[:2]:
-        d.text((LW - 60, y), isolate_latin(line), font=fnt,
-               fill=(248, 247, 242, 255), anchor="ra", direction="rtl",
-               language="ur")
-        y += 78
+    # Small corner labels (backdrop area in typical podium framing):
+    # date (Latin) + credit top-left; speaker drawn in two parts so a
+    # Latin name never gets word-reversed by the RTL Urdu run:
+    # Urdu title right-aligned, Latin name left-aligned under it.
+    def shadow_text(pos, text, font, fill, anchor, **kw):
+        x, y = pos
+        d.text((x + 2, y + 2), text, font=font, fill=(0, 0, 0, 200),
+               anchor=anchor, **kw)
+        d.text(pos, text, font=font, fill=fill, anchor=anchor, **kw)
+
     if speaker:
-        sf = renderer._font(True, 38, "Bold")
-        d.text((LW - 60, 262), isolate_latin(speaker), font=sf,
-               fill=(255, 231, 151, 255), anchor="ra", direction="rtl",
-               language="ur")
+        sf = renderer._font(True, 34, "Bold")
+        urdu_part, _, latin_part = speaker.partition("|")
+        if latin_part.strip():
+            lf = renderer._font(False, 32, "Bold")
+            shadow_text((LW - 50, 136), latin_part.strip(), lf,
+                        (255, 231, 151, 255), "ra")
+        shadow_text((LW - 50, 80), isolate_latin(urdu_part.strip()), sf,
+                    (255, 231, 151, 255), "ra", direction="rtl",
+                    language="ur")
     if date:
-        df = renderer._font(False, 30, "SemiBold")
-        d.text((60, 262), date, font=df, fill=(228, 232, 242, 255),
-               anchor="la")
+        df = renderer._font(False, 26, "SemiBold")
+        shadow_text((50, 86), date, df, (228, 232, 242, 255), "la")
     if credit:
-        cf = renderer._font(False, 24, "Medium")
-        d.text((40, LH - TICKER_H - 34), credit, font=cf,
-               fill=(200, 206, 220, 220), anchor="lm")
+        cf = renderer._font(False, 22, "Medium")
+        shadow_text((50, 122), credit, cf, (200, 206, 220, 230), "la")
     if ticker:
         _draw_ticker_bar(d, LW, LH)
     im.save(out)

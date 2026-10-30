@@ -16,7 +16,9 @@ oauth = json.loads(
 os.environ["NR_YOUTUBE_CLIENT_ID"] = oauth["client_id"]
 os.environ["NR_YOUTUBE_CLIENT_SECRET"] = oauth["client_secret"]
 os.environ["NR_YOUTUBE_REFRESH_TOKEN"] = oauth["refresh_token"]
-os.environ["NR_YOUTUBE_PRIVACY"] = "unlisted"  # review first, public on approval
+# Review uploads default to unlisted; pass "public" as 2nd CLI arg
+# only when the operator has approved and said to post.
+os.environ["NR_YOUTUBE_PRIVACY"] = sys.argv[2] if len(sys.argv) > 2 else "unlisted"
 
 sys.path.insert(0, str(HERE.parent))
 from nr_news.config import CONFIG  # noqa: E402
@@ -66,7 +68,7 @@ def main() -> None:
         payload = {"status": "success", "video": key,
                    "video_id": result["video_id"],
                    "watch_url": f"https://www.youtube.com/watch?v={result['video_id']}",
-                   "privacy": "unlisted"}
+                   "privacy": os.environ["NR_YOUTUBE_PRIVACY"]}
     except ShortUnavailable as exc:
         payload = {"status": "failed", "video": key, "reason": str(exc)[:300]}
     except Exception as exc:  # network/API errors: record, don't crash silently
