@@ -256,6 +256,51 @@ def make_subtitle_pngs(srt_path: Path, work: Path,
     return out
 
 
+def make_subtitle_video(srt_path: Path, work: Path, duration: float,
+                        landscape: bool) -> Path:
+    """Pre-render all cues into ONE transparent subtitle video track.
+
+    Feeding every cue as a separate looped image input makes ffmpeg
+    buffer thousands of frames and stall/OOM on longer packages.
+    A single QTRLE-alpha track (frames only at cue boundaries) keeps
+    the main filter graph to one timed overlay.
+    """
+    if landscape:
+        cues = make_subtitle_pngs(srt_path, work, width=LW,
+                                  band_h=LS_SUB_BAND_H, font_size=48,
+                                  wrap_w=1700, bottom_pad=20)
+        width, band_h = LW, LS_SUB_BAND_H
+    else:
+        cues = make_subtitle_pngs(srt_path, work)
+        width, band_h = W, SUB_BAND_H
+    blank = work / "sub_blank.png"
+    Image.new("RGBA", (width, band_h), (0, 0, 0, 0)).save(blank)
+    entries: list[tuple[Path, float]] = []
+    t = 0.0
+    for st, en, png in cues:
+        if st > t:
+            entries.append((blank, st - t))
+        entries.append((png, max(en - st, 0.1)))
+        t = en
+    if t < duration:
+        entries.append((blank, duration - t))
+    list_path = work / "subs_concat.txt"
+    with open(list_path, "w") as f:
+        for png, dur in entries:
+            f.write(f"file '{png.resolve()}'\nduration {dur:.3f}\n")
+        if entries:
+            f.write(f"file '{entries[-1][0].resolve()}'\n")
+    out = work / "subs_track.mov"
+    cmd = [ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0", "-i",
+           str(list_path), "-vsync", "vfr", "-c:v", "qtrle",
+           "-pix_fmt", "argb", str(out)]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise SystemExit("subtitle track render failed: "
+                         + proc.stderr[-400:])
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -321,29 +366,24 @@ def main() -> None:
     next_idx = 2  # 0 = video, 1 = static overlay
     cur = "base"
     if args.subtitles:
-        if landscape:
-            cues = make_subtitle_pngs(Path(args.subtitles), work, width=LW,
-                                      band_h=LS_SUB_BAND_H, font_size=48,
-                                      wrap_w=1700, bottom_pad=20)
-        else:
-            cues = make_subtitle_pngs(Path(args.subtitles), work)
-        for k, (st, en, png) in enumerate(cues):
-            extra_inputs += ["-loop", "1", "-i", str(png)]
-            nxt = f"s{k}"
-            vf += (f";[{cur}][{next_idx}:v]overlay=0:{sub_y}:"
-                   f"enable='between(t,{st:.2f},{en:.2f})'[{nxt}]")
-            cur = nxt
-            next_idx += 1
+        subs_video = make_subtitle_video(Path(args.subtitles), work,
+                                         duration, landscape)
+        extra_inputs += ["-i", str(subs_video)]
+        vf += (f";[{cur}][{next_idx}:v]overlay=0:{sub_y}:"
+               f"eof_action=repeat[subs]")
+        cur = "subs"
+        next_idx += 1
     if has_ticker:
         scroll_png, scroll_w, label_png = make_ticker_pngs(args.ticker, work)
-        extra_inputs += ["-loop", "1", "-i", str(scroll_png)]
+        extra_inputs += ["-loop", "1", "-framerate", "30", "-i", str(scroll_png)]
         vf += (f";[{cur}][{next_idx}:v]overlay="
                f"x='{fw}-mod(t*{TICKER_SPEED},{fw + scroll_w})':"
                f"y={fh - TICKER_H}[tk]")
         cur = "tk"
         next_idx += 1
-        extra_inputs += ["-loop", "1", "-i", str(label_png)]
-        vf += f";[{cur}][{next_idx}:v]overlay=0:{fh - TICKER_H}[fin]"
+        extra_inputs += ["-loop", "1", "-framerate", "30", "-i", str(label_png)]
+        vf += (f";[{cur}][{next_idx}:v]overlay=0:{fh - TICKER_H}:"
+               f"eof_action=repeat[fin]")
         cur = "fin"
         next_idx += 1
 

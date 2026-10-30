@@ -1,7 +1,8 @@
 # AZAD STUDIO — Publishing Plan (from 29 Oct 2026)
 
-Operator decisions, locked in. While the YouTube channel upload limit
-lasts, only **3 videos per day**; the count increases next month.
+Operator decisions, locked in. **From 30 Oct 2026 the desk can post
+6 videos per day** (raised from the earlier 3-per-day limit while the
+YouTube upload cap lasted).
 
 ## Daily rhythm (this month)
 
@@ -58,3 +59,12 @@ fine: **<= 90 s → 9:16 portrait, > 90 s → 16:9 landscape** (builder
 auto-selects). A **scrolling English / Roman Urdu ticker** is standard
 when a word-for-word Urdu translation is not possible (checked Urdu
 subtitles are still burned in whenever they can be verified).
+
+**Leader coverage queue (30 Oct 2026):** speeches and press
+conferences of famous leaders are a standing beat — **Revanth Reddy
+and Asaduddin Owaisi first**, then Rahul Gandhi, Priyanka Gandhi,
+Sanjay Singh and other leaders. Use their/their parties'/government
+departments' official uploads (websites, Facebook pages, official
+streams) wherever possible; verify speaker/event/date, keep the
+original voice, attribute claims to the speaker, and complete the
+review report before anything is posted.
