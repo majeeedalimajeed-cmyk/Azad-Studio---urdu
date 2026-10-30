@@ -44,9 +44,17 @@ the number of daily videos increases beyond three.
 Political packages are now built primarily from **authentic footage**
 of politicians speaking (parliament, press conferences, rallies,
 interviews), under `FOOTAGE_PROTOCOL.md`: original voice only (no AI
-anchor over speech), 9:16 vertical, Urdu subtitles checked word by
-word, verified speaker/event/date, rights checked and recorded, and
-a completed review report (`footage_review_template.md`) with human
-approval before anything is published. **Nothing auto-publishes.**
+anchor over speech), Urdu subtitles checked word by word, verified
+speaker/event/date, rights checked and recorded, and a completed
+review report (`footage_review_template.md`) with human approval
+before anything is published. **Nothing auto-publishes.**
 Builder: `footage_clip.py` (rights-cleared local file + exact
-timestamps in, packaged vertical out).
+timestamps in, packaged video out).
+
+Update (30 Oct 2026): footage must be **current** — Parliament /
+Sansad TV, PMO, PIB, government department uploads and official
+press conferences first, India/Telangana priority. Longer videos are
+fine: **<= 90 s → 9:16 portrait, > 90 s → 16:9 landscape** (builder
+auto-selects). A **scrolling English / Roman Urdu ticker** is standard
+when a word-for-word Urdu translation is not possible (checked Urdu
+subtitles are still burned in whenever they can be verified).

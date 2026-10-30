@@ -66,9 +66,35 @@ needs checking. The goal is accurate, responsible political journalism
 
 ## Tooling
 
-- `footage_clip.py` — builds a 9:16 package from a rights-cleared
-  local footage file: exact start/end trim, original audio untouched,
-  blurred-pad vertical framing (speaker visible), AZAD STUDIO brand
-  bar, Urdu headline, speaker + date lower-third, burned Urdu
-  subtitles (from a verified SRT), source credit line where required.
+- `footage_clip.py` — builds a package from a rights-cleared local
+  footage file: exact start/end trim, original audio untouched,
+  AZAD STUDIO brand bar, Urdu headline, speaker + date, burned Urdu
+  subtitles (from a verified SRT), optional scrolling ticker, source
+  credit line where required.
 - `footage_review_template.md` — the mandatory pre-export report.
+
+## Addendum (30 Oct 2026) — current footage, longer videos, ticker
+
+Operator rules added after the first sample (which used 2016 archive
+footage and was rejected as too old):
+
+1. **Current footage only.** Pick the day's / week's actual political
+   speeches. Preferred sources, in order: Parliament (Sansad TV —
+   Lok Sabha / Rajya Sabha proceedings), PMO India, Press Information
+   Bureau (PIB), government ministry/department channels, official
+   press conferences and government webcasts (NIC `webcast.gov.in` /
+   `pmindiawebcast.nic.in`). Prioritise India / Telangana politics.
+2. **Longer videos are welcome** now that YouTube posting is open:
+   the duration rule applies to footage too — **<= 90 s → portrait
+   9:16 (1080x1920); > 90 s → landscape 16:9 (1920x1080)**.
+   `footage_clip.py` selects this automatically (`--format auto`).
+3. **Scrolling ticker is standard furniture** for the news-channel
+   look (`--ticker`, items separated by `|`). If a word-for-word Urdu
+   translation of the speech is not possible, the ticker runs in
+   **English / Roman Urdu** summarising what the speaker is saying,
+   and the package must say so in its review report. Where a checked
+   Urdu translation IS possible, burn Urdu subtitles as before — the
+   ticker complements them, never replaces accuracy.
+4. Archive footage (like the 2016 sample) is for format tests only,
+   must be labelled with its true date, and is never presented as
+   current news.
