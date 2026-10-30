@@ -55,7 +55,7 @@ def test_editorial_order_hyderabad_then_politics_then_world():
                    original_headline="Cricket team wins series final",
                    body_excerpt="A thrilling series decider.", category="sports")
     assert ResearchAgent.priority(regional_politics) >= ResearchAgent.priority(regional)
-    assert ResearchAgent.priority(regional) > ResearchAgent.priority(politics)
+    assert ResearchAgent.priority(politics) > ResearchAgent.priority(regional)
     assert ResearchAgent.priority(politics) > ResearchAgent.priority(world)
     assert ResearchAgent.priority(world) > ResearchAgent.priority(sports)
 
@@ -133,5 +133,42 @@ def test_publish_queue_prefers_regional_over_old_backlog(tmp_path):
 
     pipeline.publisher = _Pub()
     results = pipeline.publish_approved_pending(limit=5)
-    assert len(results) == 2
+    # Operator rule: the generic world summit is not politics, a govt
+    # decision, war or the day's regional news, so Facebook holds it
+    # back; only the regional-politics story is published.
+    assert len(results) == 1
     assert published_order[0] == regional_id
+
+
+def test_facebook_bucket_only_importance_categories():
+    from nr_news.agents.research import ResearchAgent
+
+    politics = _cand(original_headline="Parliament passes new bill after debate",
+                     body_excerpt="Lok Sabha government bill voting.", category="politics")
+    govt = _cand(original_headline="Cabinet approves new irrigation scheme",
+                 body_excerpt="The cabinet approved the scheme on Tuesday.", category="india")
+    war = _cand(original_headline="Army reports border clash, ceasefire talks begin",
+                body_excerpt="Troops exchanged fire along the border.", category="world")
+    day = _cand(original_headline="Hyderabad metro expansion announced",
+                body_excerpt="HMWSSB Hyderabad water supply notice.", category="hyderabad")
+    other = _cand(original_headline="Cricket team wins series final",
+                  body_excerpt="A thrilling series decider.", category="sports")
+    assert ResearchAgent.facebook_bucket(politics) == "politics"
+    assert ResearchAgent.facebook_bucket(govt) == "govt"
+    assert ResearchAgent.facebook_bucket(war) == "war"
+    assert ResearchAgent.facebook_bucket(day) == "day"
+    assert ResearchAgent.facebook_bucket(other) == "other"
+    # War outranks ordinary world/development news in the queue.
+    assert ResearchAgent.priority(war) > ResearchAgent.priority(other)
+
+
+def test_controversial_protest_news_is_held_back_from_facebook():
+    from nr_news.agents.research import ResearchAgent
+
+    protest = _cand(original_headline="Bloc plans mock impeachment, demands CEC resignation",
+                    body_excerpt="Opposition rally against vote theft at Ramlila Maidan.",
+                    category="politics")
+    factual = _cand(original_headline="Parliament passes new bill after debate",
+                    body_excerpt="Lok Sabha government bill voting.", category="politics")
+    assert ResearchAgent.facebook_bucket(protest) == "other"
+    assert ResearchAgent.facebook_bucket(factual) == "politics"

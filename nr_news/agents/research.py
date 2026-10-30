@@ -28,6 +28,17 @@ PRIORITY_PATTERNS = {
         r"election commission|lok sabha|rajya sabha|vidhan sabha|panchayat|municipal|local body|"
         r"الیکشن|حکومت|وزیر|عدالت|اسمبلی|پارلیمنٹ|صدر|گورنر|سیاست|سیاسی|پارٹی|امیدوار|ووٹ|"
         r"منشور|قانون|بل|پالیسی|اسکیم|سرکاری|حکومتی", re.I),
+    # War and conflict news (operator: always important for Facebook).
+    "war": re.compile(
+        r"war|conflict|ceasefire|missile|airstrike|air strike|army|military|defence|defense|"
+        r"border clash|troops|soldier|invasion|bombard|shelling|جنگ|حملہ|فوج|دفاع|سرحد|میزائل|"
+        r"جھڑپ|گولہ باری", re.I),
+    # Government decisions: approvals, schemes, policy moves, price calls.
+    "govt_decision": re.compile(
+        r"cabinet approv|approv\w* (a |the )?(scheme|policy|bill|project|package)|"
+        r"government (approv|announc|launch|decid|clear)|announces scheme|new policy|"
+        r"ordinance|price (cut|hike|revision)|scheme (launch|approv)|"
+        r"کابینہ|اسکیم منظور|حکومت نے منظور|فیصلہ", re.I),
     # International affairs after regional and national politics.
     "international": re.compile(
         r"international|world|global|foreign|diplomacy|diplomatic|bilateral|summit|"
@@ -44,6 +55,10 @@ PRIORITY_PATTERNS = {
         r"ٹرانسپورٹ|انفراسٹرکچر|معیشت|ٹیکنالوجی|سائنس|موسم|بارش|بجٹ|منڈی|ریلوے|"
         r"میٹرو|ایئرپورٹ|سڑک|پل|بجلی|پانی|آبپاشی|ہسپتال|فصل|کسان|امتحان|بھرتی", re.I),
 }
+
+CONTROVERSIAL_PROTEST = re.compile(
+    r"impeachment|resign\w+ (demand|call)|demand\w* .*resign|vote chori|vote theft|"
+    r"مواخذ|استعفیٰ|ووٹ چوری", re.I)
 
 RESEARCH_SYSTEM = """You are Agent A, an Urdu news research and extraction agent.
 You receive ONLY a short excerpt from an original report, its headline, and verified evidence notes.
@@ -72,9 +87,11 @@ class ResearchAgent:
 
     @staticmethod
     def priority(candidate: Candidate) -> int:
-        """Editorial order: Hyderabad/Telangana first, then politics, then
-        India/world, then other public-interest news. Stories from the
-        preferred national dailies get a small tie-break boost."""
+        """Editorial order (operator, 29 Oct 2026: choose more political
+        news, Facebook included): regional politics first, then national
+        politics, then regional news, then India/world, then other
+        public-interest news. Stories from the preferred national
+        dailies get a small tie-break boost."""
         text = " ".join([
             candidate.original_headline, candidate.body_excerpt, candidate.url,
             candidate.category or "", candidate.publisher or "",
@@ -89,12 +106,15 @@ class ResearchAgent:
         )) or section in {"politics", "political pulse", "political-pulse", "elections"}
         international = bool(PRIORITY_PATTERNS["international"].search(text))
         development = bool(PRIORITY_PATTERNS["development"].search(text))
-        if regional and political:
-            score = 15
+        war = bool(PRIORITY_PATTERNS["war"].search(text))
+        if regional and (political or war):
+            score = 16
+        elif war:
+            score = 14
+        elif political and not international:
+            score = 14
         elif regional:
             score = 13
-        elif political and not international:
-            score = 12
         elif political and international:
             score = 11
         elif international:
@@ -106,6 +126,34 @@ class ResearchAgent:
         if candidate.publisher in ResearchAgent.PREFERRED_PUBLISHERS:
             score += 1
         return score
+
+    @staticmethod
+    def facebook_bucket(candidate: Candidate) -> str:
+        """What Facebook may auto-publish (operator, 29 Oct 2026):
+        politics, government decisions, war, or the day's important
+        regional news. Everything else returns 'other' and is held
+        back from the Facebook queue — no filler stories. Controversial
+        protest material (resignation/impeachment demands, vote-theft
+        allegations) is never published, per operator rule."""
+        text = " ".join([
+            candidate.original_headline, candidate.body_excerpt, candidate.url,
+            candidate.category or "",
+        ])
+        if CONTROVERSIAL_PROTEST.search(text):
+            return "other"
+        section = (candidate.category or "").split(",")[0].strip().lower()
+        if PRIORITY_PATTERNS["war"].search(text):
+            return "war"
+        if PRIORITY_PATTERNS["govt_decision"].search(text):
+            return "govt"
+        if PRIORITY_PATTERNS["political"].search(
+                candidate.original_headline + " " + candidate.body_excerpt
+                + " " + candidate.url) or section in {
+                    "politics", "political pulse", "political-pulse", "elections"}:
+            return "politics"
+        if PRIORITY_PATTERNS["regional"].search(text):
+            return "day"
+        return "other"
 
     def ingest(self, source_results: list[SourceResult], mode: str) -> list[str]:
         """Persist candidates and enqueue immediate verification for new items."""
