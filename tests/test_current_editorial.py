@@ -95,7 +95,7 @@ def test_verified_english_roman_card_has_no_unreviewed_photo(tmp_path):
     p.translator.translate=Mock(return_value={'roman_headline':'Telangana cabinet ne taleemi policy manzoor ki',
         'roman_bullets':['Cabinet ne taleemi policy manzoor ki.','Policy Telangana ke schools ke liye hai.','Elan Hyderabad mein kiya gaya.']})
     p.validator.validate=Mock(return_value={'ok':True,'errors':[],'warnings':[],'model_review':{'consistent':True}})
-    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'issues':[]})
+    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'current_news':True,'straight_news':True,'issues':[]})
     result=p.generate_from_verified(cid,VerificationResult(True,[],['source checked'],'high'))
     assert result['status']=='rendered'
     assert len(result['cards'])==1 and Path(result['cards'][0]).exists()
@@ -234,10 +234,29 @@ def test_continuation_cards_are_held_as_a_whole(tmp_path):
         'facts':{},'verification_notes':[],'requires_human_review':False})
     p.translator.translate=Mock(return_value={'roman_headline':'Taleemi policy','roman_bullets':['Ek','Do','Teen']})
     p.validator.validate=Mock(return_value={'ok':True,'errors':[],'warnings':[],'model_review':{'consistent':True}})
-    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'issues':[]})
+    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'current_news':True,'straight_news':True,'issues':[]})
     p.cards.render=Mock(return_value=[SimpleNamespace(page_count=2),SimpleNamespace(page_count=2)])
     p.publisher.publish=Mock()
     out=p.generate_from_verified(cid,VerificationResult(True,[],[],'high'))
     assert out['reason']=='single_card_required'
     assert db.get_editorial(out['editorial_id'])['status']=='pending_review'
     p.publisher.publish.assert_not_called()
+
+
+def test_opinion_or_historical_review_holds_card(tmp_path):
+    conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
+    c=Candidate(source='the_wire',publisher='The Wire',url='https://thewire.in/news/story',
+        original_headline='Parliament reviews education policy',published_at=iso(),updated_at=None,
+        language='en',body_excerpt='Parliament reviews education policy.'*5,category='politics')
+    cid,_=db.insert_candidate(p.research._to_row(c,'hourly'))
+    p._read_original_article=Mock(return_value='Parliament reviews education policy in India. '*20)
+    p.research.summarize_urdu=Mock(return_value={'urdu_headline':'Education policy review',
+        'urdu_bullets':['Parliament reviewed policy.','The review involved education.','The debate was in India.'],
+        'facts':{},'verification_notes':[],'requires_human_review':False})
+    p.translator.translate=Mock(return_value={'roman_headline':'Taleemi policy','roman_bullets':['Ek','Do','Teen']})
+    p.validator.validate=Mock(return_value={'ok':True,'errors':[],'warnings':[],'model_review':{'consistent':True}})
+    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'current_news':False,'straight_news':False,'issues':['Historical opinion']})
+    p.cards.render=Mock()
+    out=p.generate_from_verified(cid,VerificationResult(True,[],[],'high'))
+    assert out['reason']=='not_current_straight_news'
+    p.cards.render.assert_not_called()

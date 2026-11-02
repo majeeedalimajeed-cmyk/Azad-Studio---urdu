@@ -260,6 +260,9 @@ class NewsPipeline:
         candidate = self.db.get_candidate(candidate_id) or {}
         if not source_allowed(candidate):
             return {"status": "held", "reason": "source_not_in_operator_list"}
+        if "/ptiprnews/" in urlparse(candidate.get("url", "")).path.lower():
+            self.db.update_candidate(candidate_id, status="excluded", review_reason="press_release_not_independent_news")
+            return {"status": "held", "reason": "press_release_not_independent_news"}
         if "/video/" in urlparse(candidate.get("url", "")).path.lower():
             self.db.update_candidate(candidate_id, status="excluded", review_reason="video_page_not_a_news_article")
             return {"status": "held", "reason": "video_page_not_a_news_article"}
@@ -434,8 +437,11 @@ class NewsPipeline:
                 system=("Independently check every English and Roman Urdu claim against the original article. "
                         "Require exact support for names, dates, figures and attribution; proposals remain proposals. "
                         "Reject unsupported claims, uncertainty, mismatches, and prohibited protest coverage. "
-                        "Also judge whether the news is important rather than trivial or promotional. "
-                        "Return JSON with supported boolean, important boolean and issues array. Never infer missing facts."),
+                        "Check factual event dates and tense: never treat a retrospective about an old event as a new event. "
+                        "Judge whether this is straight news, not opinion, retrospective analysis, commentary or promotion. "
+                        "Judge whether this reports an important event that occurred within the last 36 hours. "
+                        "If timing, context, attribution, recency or classification is uncertain, reject. "
+                        "Return JSON with supported, important, current_news and straight_news booleans and issues array. Never infer missing facts."),
                 user={"article": article[:10000], "english": urdu, "roman_urdu": roman},
                 model=getattr(self.config, "validator_model", None) or self.config.llm_model,
                 max_tokens=900,
@@ -446,6 +452,8 @@ class NewsPipeline:
             return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_not_approved"}
         if fact_review.get("important") is not True:
             return {"status": "held", "candidate_id": candidate_id, "reason": "importance_not_approved"}
+        if fact_review.get("current_news") is not True or fact_review.get("straight_news") is not True:
+            return {"status": "held", "candidate_id": candidate_id, "reason": "not_current_straight_news"}
         notes.append("Independent article-grounded fact review passed: " + json_dumps(fact_review))
         raw = _json(candidate.get("raw_json"), {})
         source_urls = [candidate["url"]] + official_urls

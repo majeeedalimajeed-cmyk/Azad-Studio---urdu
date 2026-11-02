@@ -22,7 +22,7 @@ with TemporaryDirectory() as tmp:
         print('SOURCE',r.source,'ok=',r.ok,'count=',r.item_count,flush=True)
         for c in r.candidates:
             when=parse_iso(c.published_at)
-            if when and '/video/' not in c.url.lower() and -2 < (utcnow()-when).total_seconds()/3600 < 36 and not editorial_exclusion_text(c.original_headline,c.body_excerpt):
+            if when and '/video/' not in c.url.lower() and '/ptiprnews/' not in c.url.lower() and -2 < (utcnow()-when).total_seconds()/3600 < 36 and not editorial_exclusion_text(c.original_headline,c.body_excerpt):
                 pool.append(c)
     # Try each source without letting one paywalled feed starve the others.
     pool.sort(key=ResearchAgent.priority,reverse=True)
