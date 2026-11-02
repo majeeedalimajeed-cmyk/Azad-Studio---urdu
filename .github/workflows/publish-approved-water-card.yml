@@ -40,8 +40,8 @@ jobs:
           try:
               feed = client._call('GET', f'/{page_id}/feed', token=token,
                                   params={'fields': 'id,message,created_time', 'limit': 100})
-          except Exception:
-              print('HOLD: Could not check Page feed for an existing post; no upload attempted.')
+          except Exception as exc:
+              print('HOLD: Could not check Page feed; no upload attempted.', type(exc).__name__, str(exc)[:500])
               sys.exit(1)
           for post in feed.get('data', []):
               if marker in str(post.get('message', '')):
