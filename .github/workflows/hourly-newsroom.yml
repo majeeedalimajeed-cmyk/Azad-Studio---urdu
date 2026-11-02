@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: hourly-newsroom
@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NR_SKIP_DOTENV: "1"
+      NR_GITHUB_LEDGER_TOKEN: ${{ github.token }}
       NR_DRY_RUN: ${{ vars.NR_DRY_RUN }}
       NR_PUBLISH_ENABLED: ${{ vars.NR_PUBLISH_ENABLED }}
       NR_PUBLISH_SAFETY_OK: ${{ vars.NR_PUBLISH_SAFETY_OK }}
@@ -64,6 +65,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
         continue-on-error: true
         run: PYTHONPATH=. python scripts/probe_english_cards.py
+
+      - name: Verify durable publishing ledger (manual branch only)
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+        run: python -m nr_news.publication_ledger
 
       - name: Restore durable SQLite database
         uses: actions/cache@v4

@@ -307,6 +307,13 @@ def test_durable_scheduler_queues_morning_comprehensive_scan(tmp_path):
     assert any(json.loads(j["payload_json"]).get("mode") == "morning" for j in jobs)
 
 
+class _AllowTestLedger:
+    def reserve(self, **kwargs):
+        pass
+    def finish(self, *args, **kwargs):
+        pass
+
+
 def _verified_current_card(db, editorial_id, card):
     from nr_news.util import sha256_file
     path = Path(card["file_path"])
@@ -435,6 +442,7 @@ def test_graph_api_error_is_recorded_without_false_success(tmp_path):
             return None
 
     pipeline.publisher.graph = FakeGraph()
+    pipeline.publisher.ledger = _AllowTestLedger()
     _verified_current_card(db, eid, card)
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "failed"
@@ -495,6 +503,7 @@ def test_successful_publish_cross_posts_to_instagram(tmp_path):
             return "https://www.instagram.com/p/TEST/"
 
     pipeline.publisher.graph = FakeGraph()
+    pipeline.publisher.ledger = _AllowTestLedger()
     _verified_current_card(db, eid, card)
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "success"
@@ -1150,7 +1159,58 @@ def test_publish_gate_satisfied_by_standing_operator_approval(tmp_path):
             return None
 
     pipeline.publisher.graph = FakeGraph()
+    pipeline.publisher.ledger = _AllowTestLedger()
     _verified_current_card(db, eid, card)
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "success"
     assert db.get_setting("facebook_test_post_passed") == "true"
+
+
+def _publisher_for_ledger_test(tmp_path, durable_ledger, graph):
+    cfg=temp_config(tmp_path,dry_run=False,publish_enabled=True,publish_safety_switch=True,
+        operator_approved=True,verify_approved=True,auto_post_enabled=True,
+        facebook_page_token='test-token',expected_page_name='AZAD STUDIO',instagram_enabled=False)
+    db=Database(cfg.db_path);desk=NewsPipeline(cfg,db)
+    db.set_setting('facebook_identity_verified_at',iso());db.set_setting('facebook_page_id','123')
+    db.set_setting('facebook_test_post_passed','true')
+    candidate=sample_candidate(url='https://www.indiatoday.in/story/same-story')
+    cid,_=db.insert_candidate(desk.research._to_row(candidate,'test'))
+    content={'urdu_headline':'English headline','urdu_bullets':['One','Two','Three'],
+        'roman_headline':'Roman headline','roman_bullets':['Ek','Do','Teen'],
+        'verification_notes':[],'source_urls':[],'publication_time':iso(),'media':None}
+    eid,_=db.insert_editorial(cid,None,content,status='approved')
+    path=tmp_path/'card.png'; card_id=db.insert_card(eid,str(path),'abc',1080,1350,1,1,'passed')
+    card={'id':card_id,'file_path':str(path),'sha256':'abc','visual_status':'passed'}
+    _verified_current_card(db,eid,card)
+    desk.publisher.ledger=durable_ledger;desk.publisher.graph=graph
+    return desk.publisher,eid,card
+
+
+def test_durable_ledger_failure_prevents_graph_upload(tmp_path):
+    from unittest.mock import Mock
+    from nr_news.publication_ledger import LedgerUnavailable
+    graph=Mock();graph.confirmed_page_id.return_value='123'
+    ledger=Mock();ledger.reserve.side_effect=LedgerUnavailable('unavailable')
+    publisher,eid,card=_publisher_for_ledger_test(tmp_path,ledger,graph)
+    result=publisher.publish(eid,card,dry_run=False)
+    assert result['reason']=='durable_ledger_unavailable'
+    graph.publish_photo.assert_not_called()
+
+
+def test_ambiguous_upload_never_retried_even_after_database_loss(tmp_path):
+    from unittest.mock import Mock
+    from test_publication_ledger import FakeGitHub, ledger
+    gh=FakeGitHub();graph=Mock();graph.confirmed_page_id.return_value='123'
+    graph.publish_photo.side_effect=GraphAPIError('network timeout',transient=True)
+    one=tmp_path/'first';one.mkdir()
+    publisher,eid,card=_publisher_for_ledger_test(one,ledger(gh),graph)
+    assert publisher.publish(eid,card,dry_run=False)['status']=='unknown'
+    assert gh.data['records'][0]['status']=='uncertain'
+    assert graph.publish_photo.call_count==1
+    # Simulate a completely lost SQLite cache and a regenerated editorial.
+    two=tmp_path/'after-cache-loss';two.mkdir()
+    restarted_graph=Mock();restarted_graph.confirmed_page_id.return_value='123'
+    restarted,eid2,card2=_publisher_for_ledger_test(two,ledger(gh),restarted_graph)
+    out=restarted.publish(eid2,card2,dry_run=False)
+    assert out['reason']=='durable_duplicate_or_previous_attempt'
+    restarted_graph.publish_photo.assert_not_called()

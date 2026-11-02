@@ -8,14 +8,17 @@ from typing import Any
 from ..config import CONFIG
 from ..db import Database
 from ..facebook import FacebookGraphClient, GraphAPIError
+from ..publication_ledger import GitHubPublicationLedger, LedgerDuplicate, LedgerUnavailable
 from ..util import iso, json_dumps, redact, sha256_file, sha256_text
 
 
 class PublishingAgent:
-    def __init__(self, db: Database | None = None, graph: FacebookGraphClient | None = None, config=CONFIG):
+    def __init__(self, db: Database | None = None, graph: FacebookGraphClient | None = None, config=CONFIG,
+                 ledger: GitHubPublicationLedger | None = None):
         self.db = db or Database(config.db_path)
         self.graph = graph or FacebookGraphClient(self.db, config)
         self.config = config
+        self.ledger = ledger or GitHubPublicationLedger()
 
     @staticmethod
     def _json(value: str | None, default: Any) -> Any:
@@ -148,6 +151,19 @@ class PublishingAgent:
         if existing and existing["status"] == "failed" and int(existing["attempts"]) >= 3:
             return self._hold(idempotency_key, editorial_id, card_row, caption_hash,
                               "Retry limit reached; operator review is required.")
+        # The remote compare-and-swap reservation MUST commit before any
+        # Graph upload. SQLite and Actions cache are not crash-durable enough.
+        candidate = self.db.get_candidate(editorial.get("candidate_id")) or {}
+        try:
+            self.ledger.reserve(key=idempotency_key, candidate=candidate,
+                                editorial_id=editorial_id, page_id=page_id, caption_marker=marker)
+        except LedgerDuplicate:
+            return {"status": "held", "reason": "durable_duplicate_or_previous_attempt"}
+        except LedgerUnavailable as exc:
+            self.db.insert_api_event("facebook", "durable_ledger", "held", str(exc),
+                                     details={"editorial_id": editorial_id})
+            return {"status": "held", "reason": "durable_ledger_unavailable"}
+
         if not existing:
             pid = self.db.create_publish_attempt(
                 idempotency_key=idempotency_key, editorial_id=editorial_id,
@@ -169,7 +185,18 @@ class PublishingAgent:
                     return reconciled
             try:
                 response = self.graph.publish_photo(page_id, card_row["file_path"], caption)
-                post_id = str(response.get("post_id") or response.get("id"))
+                confirmed_id = response.get("post_id") or response.get("id")
+                if not confirmed_id:
+                    raise GraphAPIError("Graph response did not confirm publication", code="NO_POST_ID", transient=True)
+                post_id = str(confirmed_id)
+                ledger_warning = None
+                try:
+                    self.ledger.finish(idempotency_key, status="confirmed", post_id=post_id)
+                except LedgerUnavailable as exc:
+                    # The pre-upload reservation remains durable and blocks all retries.
+                    ledger_warning = str(exc)
+                    self.db.insert_api_event("facebook", "durable_ledger", "error", ledger_warning,
+                                             details={"editorial_id": editorial_id})
                 self.db.update_publish_attempt(
                     pid, status="success", response_at=iso(), post_id=post_id,
                     photo_id=str(response.get("id") or ""), last_error=None,
@@ -189,6 +216,8 @@ class PublishingAgent:
                                                   "attempt": attempt_no, "test": test})
                 result = {"status": "success", "post_id": post_id, "attempt_id": pid,
                           "attempts": attempt_no, "caption_marker": marker}
+                if ledger_warning:
+                    result["ledger_warning"] = "Upload confirmed but ledger outcome update requires review."
                 result["instagram"] = self._cross_post_instagram(
                     page_id, post_id, caption, test=test)
                 return result
@@ -197,6 +226,11 @@ class PublishingAgent:
                 self.db.insert_api_event("facebook", "publish_photo", "error", str(exc),
                                          http_status=exc.status, error_code=exc.code,
                                          details={"page_id": page_id, "attempt": attempt_no})
+                try:
+                    self.ledger.finish(idempotency_key,
+                                       status="uncertain" if exc.transient or exc.code == "NO_POST_ID" else "rejected")
+                except LedgerUnavailable:
+                    pass  # The original reservation still blocks retries.
                 if not exc.transient and exc.code != "NO_POST_ID":
                     self.db.update_publish_attempt(pid, status="failed", response_at=iso(),
                                                    last_error=str(exc)[:1000])
@@ -207,6 +241,15 @@ class PublishingAgent:
                 self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
                                                last_error=str(exc)[:1000])
                 return {"status": "unknown", "reason": "Network/API result ambiguous; manual reconciliation required.",
+                        "attempt_id": pid}
+            except Exception as exc:
+                try:
+                    self.ledger.finish(idempotency_key, status="uncertain")
+                except LedgerUnavailable:
+                    pass
+                self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
+                                               last_error=f"Unexpected upload error: {type(exc).__name__}")
+                return {"status": "unknown", "reason": "Unexpected upload result; manual reconciliation required.",
                         "attempt_id": pid}
         return {"status": "unknown", "reason": str(last_error) if last_error else "retry loop ended", "attempt_id": pid}
 
