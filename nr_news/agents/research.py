@@ -8,7 +8,7 @@ from ..config import CONFIG
 from ..db import Database
 from ..llm import AgentUnavailable, LLMClient
 from ..models import Candidate, SourceResult, VerificationResult
-from ..util import (canonical_url, json_dumps, numbers, parse_iso, sha256_text,
+from ..util import (canonical_url, json_dumps, numbers, numeric_atoms, parse_iso, sha256_text,
                     story_fingerprint, utcnow)
 from .verification import editorial_exclusion_text
 
@@ -253,9 +253,9 @@ class ResearchAgent:
         declared = set()
         for key in ("dates", "figures"):
             for value in facts.get(key, []) or []:
-                declared |= numbers(str(value))
+                declared |= numeric_atoms(str(value))
         allowed = declared
-        generated = numbers(data["urdu_headline"] + " " + " ".join(bullets))
+        generated = numeric_atoms(data["urdu_headline"] + " " + " ".join(bullets))
         if generated and not generated.issubset(allowed):
             # The pipeline will still perform a stricter evidence check before rendering.
             data["verification_notes"] = list(data.get("verification_notes", [])) + [

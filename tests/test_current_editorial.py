@@ -260,3 +260,16 @@ def test_opinion_or_historical_review_holds_card(tmp_path):
     out=p.generate_from_verified(cid,VerificationResult(True,[],[],'high'))
     assert out['reason']=='not_current_straight_news'
     p.cards.render.assert_not_called()
+
+
+def test_date_components_from_iso_inventory_do_not_cause_false_hold():
+    from nr_news.agents.research import ResearchAgent
+    data={'urdu_headline':'Rescue completed on Nov 1',
+          'urdu_bullets':['Rescue happened on Nov 1.','Officials coordinated the rescue.','Those rescued are safe.'],
+          'verification_notes':[],'requires_human_review':False,
+          'facts':{'names':[],'dates':['2026-11-01'],'figures':[],'locations':[]}}
+    ResearchAgent._validate_output(data)
+    assert data['requires_human_review'] is False
+    data['urdu_bullets'][0]='Rescue happened on Nov 9.'
+    ResearchAgent._validate_output(data)
+    assert data['requires_human_review'] is True
