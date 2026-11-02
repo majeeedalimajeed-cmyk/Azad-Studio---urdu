@@ -35,6 +35,13 @@ with TemporaryDirectory() as tmp:
         published_at='2026-11-02T04:56:00Z',updated_at=None,language='en',
         body_excerpt='Six Indian tourists were rescued after heavy snowfall in Nepal.',category='world')
     cid,_=db.insert_candidate(p.research._to_row(candidate,'test'))
+    orig=p.research.summarize_urdu
+    def inspected_summary(candidate, verification):
+        data=orig(candidate,verification)
+        print('SUMMARY REVIEW FLAG',data.get('requires_human_review'),'notes=',data.get('verification_notes'),
+              'headline=',data.get('urdu_headline'),'bullets=',data.get('urdu_bullets'),'facts=',data.get('facts'),flush=True)
+        return data
+    p.research.summarize_urdu=inspected_summary
     out=p.process_job('verify_story',{'candidate_id':cid})
     print('CURRENT STORY TEST',out.get('status'),out.get('reason'),out.get('reasons'),out.get('errors'),flush=True)
     if out.get('status')=='rendered':
