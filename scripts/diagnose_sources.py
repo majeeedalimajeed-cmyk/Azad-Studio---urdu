@@ -12,7 +12,7 @@ with TemporaryDirectory() as tmp:
     root=Path(tmp)
     cfg=replace(CONFIG,db_path=root/'db.sqlite3',data_dir=root,card_dir=root/'cards',audit_dir=root/'audit',
         media_dir=root/'media',snapshot_dir=root/'snapshots',dry_run=True,auto_post_enabled=False,
-        auto_approve_verified=False,video_enabled=False,instagram_enabled=False,llm_max_retries=0)
+        auto_approve_verified=False,video_enabled=False,instagram_enabled=False,llm_max_retries=2)
     cfg.ensure_dirs();db=Database(cfg.db_path);p=NewsPipeline(cfg,db)
     candidate=Candidate(source='india_today',publisher='India Today',
         url='https://www.indiatoday.in/world/story/indian-tourists-rescued-nepal-shey-phoksundo-heavy-snowfall-ptag-3030318-2026-11-02',
