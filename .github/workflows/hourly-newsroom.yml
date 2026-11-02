@@ -35,10 +35,10 @@ jobs:
       NR_ROMAN_URDU_MODEL: ${{ vars.NR_ROMAN_URDU_MODEL }}
       NR_VALIDATOR_MODEL: ${{ vars.NR_VALIDATOR_MODEL }}
       NR_PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-      NR_PIXABAY_ENABLED: ${{ vars.NR_PIXABAY_ENABLED || 'true' }}
-      NR_INSTAGRAM_ENABLED: ${{ vars.NR_INSTAGRAM_ENABLED || 'true' }}
-      NR_VIDEO_ENABLED: ${{ vars.NR_VIDEO_ENABLED || 'false' }}
-      NR_YOUTUBE_ENABLED: ${{ vars.NR_YOUTUBE_ENABLED || 'true' }}
+      NR_PIXABAY_ENABLED: "false"
+      NR_INSTAGRAM_ENABLED: "false"
+      NR_VIDEO_ENABLED: "false"
+      NR_YOUTUBE_ENABLED: "false"
       NR_YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
       NR_YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       NR_YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}

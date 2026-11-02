@@ -197,15 +197,13 @@ class PublishingAgent:
                 self.db.insert_api_event("facebook", "publish_photo", "error", str(exc),
                                          http_status=exc.status, error_code=exc.code,
                                          details={"page_id": page_id, "attempt": attempt_no})
-                if not exc.transient:
+                if not exc.transient and exc.code != "NO_POST_ID":
                     self.db.update_publish_attempt(pid, status="failed", response_at=iso(),
                                                    last_error=str(exc)[:1000])
                     return {"status": "failed", "reason": str(exc), "attempt_id": pid}
-                if attempt_no < 3:
-                    self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
-                                                   last_error=str(exc)[:1000])
-                    time.sleep(2 ** (attempt_no - 1))
-                    continue
+                # An upload timeout, 5xx, 429, or missing post ID can mean the
+                # server accepted the photo despite our not receiving proof.
+                # Never retry an ambiguous upload without manual confirmation.
                 self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
                                                last_error=str(exc)[:1000])
                 return {"status": "unknown", "reason": "Network/API result ambiguous; manual reconciliation required.",
