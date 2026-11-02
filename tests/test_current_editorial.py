@@ -129,6 +129,7 @@ def test_politics_first_and_named_leader_priority():
     priority_politics=sample('Asaduddin Owaisi speaks in Parliament about policy')
     assert ResearchAgent.priority(priority_politics)>ResearchAgent.priority(other_politics)>ResearchAgent.priority(regional_nonpolitics)
     assert ResearchAgent.priority(sample('Rahul Gandhi speaks on government policy')) > ResearchAgent.priority(other_politics)
+    assert ResearchAgent.priority(sample('Revanth Reddy opens new school in Hyderabad')) > ResearchAgent.priority(other_politics)
 
 def test_india_today_source_is_allowed(tmp_path):
     conf=cfg(tmp_path);db=Database(conf.db_path);desk=NewsPipeline(conf,db)

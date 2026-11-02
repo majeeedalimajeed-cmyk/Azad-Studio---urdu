@@ -92,7 +92,8 @@ class ResearchAgent:
         section = (candidate.category or "").split(",")[0].strip().lower()
         political = bool(PRIORITY_PATTERNS["political"].search(
             candidate.original_headline + " " + candidate.body_excerpt + " " + candidate.url
-        )) or section in {"politics", "political pulse", "political-pulse", "elections"}
+        )) or section in {"politics", "political pulse", "political-pulse", "elections"} or bool(
+            re.search(r"revanth reddy|asaduddin owaisi|rahul gandhi|priyanka gandhi|sanjay singh", text, re.I))
         international = bool(PRIORITY_PATTERNS["international"].search(text))
         development = bool(PRIORITY_PATTERNS["development"].search(text))
         war = bool(PRIORITY_PATTERNS["war"].search(text))
