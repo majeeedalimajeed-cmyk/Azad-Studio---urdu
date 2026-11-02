@@ -65,6 +65,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: python -m nr_news.publication_ledger
 
+      - name: Diagnose source article structure (testing branch only)
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+        run: PYTHONPATH=. python scripts/diagnose_sources.py
+
       - name: Restore durable SQLite database
         uses: actions/cache@v4
         with:
