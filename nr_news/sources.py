@@ -126,6 +126,7 @@ class SourceMonitor:
         limit = {"breaking": 12, "hourly": 25, "morning": 60}.get(mode, 25)
         results = [
             self._hindu(limit),
+            self._india_today(limit),
             self._indian_express(limit),
             self._the_wire(limit),
         ]

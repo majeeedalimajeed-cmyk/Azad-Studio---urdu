@@ -30,7 +30,7 @@ PRIORITY_PATTERNS = {
         r"منشور|قانون|بل|پالیسی|اسکیم|سرکاری|حکومتی", re.I),
     # War and conflict news (operator: always important for Facebook).
     "war": re.compile(
-        r"war|conflict|ceasefire|missile|airstrike|air strike|army|military|defence|defense|"
+        r"\bwar\b|conflict|ceasefire|missile|airstrike|air strike|army|military|defence|defense|"
         r"border clash|troops|soldier|invasion|bombard|shelling|جنگ|حملہ|فوج|دفاع|سرحد|میزائل|"
         r"جھڑپ|گولہ باری", re.I),
     # Government decisions: approvals, schemes, policy moves, price calls.
@@ -74,15 +74,13 @@ class ResearchAgent:
         self.config = config
 
     # Sources the desk wants first for Hyderabad/Telangana, India and world.
-    PREFERRED_PUBLISHERS = ("The Hindu", "The Indian Express", "The Wire")
+    PREFERRED_PUBLISHERS = ("The Hindu", "India Today", "The Indian Express", "The Wire")
 
     @staticmethod
     def priority(candidate: Candidate) -> int:
-        """Editorial order (operator, 29 Oct 2026: choose more political
-        news, Facebook included): regional politics first, then national
-        politics, then regional news, then India/world, then other
-        public-interest news. Stories from the preferred national
-        dailies get a small tie-break boost."""
+        """Politics first across all sections; prefer the named leaders,
+        then regional and national politics. Important non-political news
+        remains eligible and publishers get a small tie-break boost."""
         text = " ".join([
             candidate.original_headline, candidate.body_excerpt, candidate.url,
             candidate.category or "", candidate.publisher or "",
@@ -98,22 +96,24 @@ class ResearchAgent:
         international = bool(PRIORITY_PATTERNS["international"].search(text))
         development = bool(PRIORITY_PATTERNS["development"].search(text))
         war = bool(PRIORITY_PATTERNS["war"].search(text))
-        if regional and (political or war):
-            score = 16
+        # Politics always precedes every other section. Prioritise the
+        # operator's named leaders without suppressing other important stories.
+        if political:
+            score = 50 + (2 if regional else (0 if international else 1))
+            if re.search(r"revanth reddy|asaduddin owaisi", text, re.I):
+                score += 10
+            elif re.search(r"rahul gandhi|priyanka gandhi|sanjay singh", text, re.I):
+                score += 5
         elif war:
-            score = 14
-        elif political and not international:
-            score = 14
+            score = 40
         elif regional:
-            score = 13
-        elif political and international:
-            score = 11
+            score = 35
         elif international:
-            score = 8
+            score = 25
         elif development:
-            score = 6
+            score = 20
         else:
-            score = 1
+            score = 10
         if candidate.publisher in ResearchAgent.PREFERRED_PUBLISHERS:
             score += 1
         return score

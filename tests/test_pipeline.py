@@ -157,8 +157,8 @@ def test_crime_story_is_excluded(tmp_path):
 
 
 def test_expanded_crime_filter_and_priority_ranking(tmp_path):
-    assert editorial_exclusion_text("Police arrest accused in fraud case")
-    assert editorial_exclusion_text("Hyderabad court rejects bail in cheating case")
+    assert not editorial_exclusion_text("Police arrest accused in fraud case")
+    assert not editorial_exclusion_text("Hyderabad court rejects bail in cheating case")
     assert not editorial_exclusion_text("Telangana cabinet approves education policy")
 
     regional = sample_candidate(
@@ -191,9 +191,9 @@ def test_crime_candidate_is_excluded_before_verification_job(tmp_path):
     db = Database(cfg.db_path)
     pipeline = NewsPipeline(cfg, db)
     candidate = sample_candidate(
-        url="https://example.org/police-arrest-fraud",
-        original_headline="Police arrest accused in fraud case",
-        body_excerpt="Police arrested an accused person in a fraud case after a complaint.",
+        url="https://example.org/political-protest",
+        original_headline="A political protest in Delhi",
+        body_excerpt="Parties held a protest in Delhi.",
     )
     result = pipeline.scan("hourly", source_results=[
         SourceResult("test_source", True, 1, "test", candidates=[candidate])

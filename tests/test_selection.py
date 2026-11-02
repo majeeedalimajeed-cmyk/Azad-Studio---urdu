@@ -133,10 +133,8 @@ def test_publish_queue_prefers_regional_over_old_backlog(tmp_path):
 
     pipeline.publisher = _Pub()
     results = pipeline.publish_approved_pending(limit=5)
-    # Operator rule: the generic world summit is not politics, a govt
-    # decision, war or the day's regional news, so Facebook holds it
-    # back; only the regional-politics story is published.
-    assert len(results) == 1
+    # Important news from all sections is eligible, with politics first.
+    assert len(results) == 2
     assert published_order[0] == regional_id
 
 

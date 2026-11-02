@@ -223,10 +223,23 @@ class Config:
         ("india", "https://www.thehindu.com/news/national/feeder/default.rss"),
         ("politics", "https://www.thehindu.com/elections/feeder/default.rss"),
         ("world", "https://www.thehindu.com/news/international/feeder/default.rss"),
+        ("general", "https://www.thehindu.com/feeder/default.rss"),
+        ("states", "https://www.thehindu.com/news/states/feeder/default.rss"),
+        ("cities", "https://www.thehindu.com/news/cities/feeder/default.rss"),
+        ("business", "https://www.thehindu.com/business/feeder/default.rss"),
+        ("sports", "https://www.thehindu.com/sport/feeder/default.rss"),
+        ("entertainment", "https://www.thehindu.com/entertainment/feeder/default.rss"),
+        ("science", "https://www.thehindu.com/sci-tech/science/feeder/default.rss"),
+        ("lifestyle", "https://www.thehindu.com/life-and-style/feeder/default.rss"),
     )
     india_today_feeds: tuple[tuple[str, str], ...] = (
         ("india", "https://www.indiatoday.in/rss/india"),
         ("general", "https://www.indiatoday.in/rss/home"),
+        ("india", "https://www.indiatoday.in/rss/1206578"),
+        ("world", "https://www.indiatoday.in/rss/1206577"),
+        ("business", "https://www.indiatoday.in/rss/1206574"),
+        ("technology", "https://www.indiatoday.in/rss/1206688"),
+        ("sports", "https://www.indiatoday.in/rss/1206550"),
     )
     wire_api: str = "https://cms.thewire.in/wp-json/wp/v2/posts"
     user_agent: str = "NRNewsBot/1.0 (+dry-run newsroom; contact: operator)"

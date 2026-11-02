@@ -21,27 +21,19 @@ if VENDOR.exists() and str(VENDOR) not in sys.path:
     sys.path.insert(0, str(VENDOR))
 
 EXCLUSION_PATTERNS = re.compile(
-    r"\bprotests?\b|\brall(?:y|ies)\b|impeachment|vote[ -]?(?:theft|chori)|special intensive revision|\bsir\b|\bresign\w*.*demand|مواخذ|ووٹ چوری|"
-    r"\bmurder\w*|قتل|\brape\w*|جنسی زیادتی|زیادتی|\brobbery\b|ڈکیتی|\btheft\b|چوری|\bdacoity\b|\bloot\w*|لُوٹ|\bfiring\b|فائرنگ|"
-    r"shooting|گولی|gangster|غنڈہ|kidnap|اغوا|abduct|assault|حملہ|\bstab(?:bed|bing|s)?\b|چاقو|graphic|dead body|لاش|"
-    r"crime-news|\bcrime\b|criminal|جرائم|مجرم|suicide|خودکشی|accident|حادثہ|bomb|blast|دھماکہ|terror|دہشت|"
-    r"police case|police custody|police arrest|\barrest(?:ed|s)?\b|گرفتار|accused|ملزم|bail|ضمانت|"
-    r"\bfir\b|ایف آئی آر|chargesheet|چالان|convict(?:ed|ion)?|سزا|sentenced|jail|جیل|prison|قید|"
-    r"fraud|دھوکہ|cheating|scam|گھوٹالہ|dowry|جہیز|harassment|ہراساں|molest|چھیڑ چھاڑ|"
-    r"domestic violence|گھریلو تشدد|smuggl|اسمگل|drug|نشیلا|narcotic|نشہ|lynch|"
-    r"gang|encounter|مقابلہ|shootout|burglar|robber|ڈاکو|pickpocket|جیب کتر|culprit|suspect|مشتبہ|"
-    r"victim|متاثرہ|violent riot|پرتشدد فساد|rumou?r|افواہ|fake|جعلی|unverified|غیر مصدقہ",
+    r"\bprotests?\b|\brall(?:y|ies)\b|impeachment|vote[ -]?(?:theft|chori)|"
+    r"special intensive revision|\bsir\b|\bresign\w*.*demand|\bdemand\w*.*resign|"
+    r"مواخذ|ووٹ چوری|graphic|dead body|لاش|violent riot|پرتشدد فساد|rumou?r|افواہ|unverified|غیر مصدقہ",
     re.I,
 )
 
-
 def editorial_exclusion_text(*parts: str) -> bool:
-    """Return True when any supplied text matches the no-crime editorial filter."""
+    """Exclude protest coverage and graphic/unverified content."""
     return bool(EXCLUSION_PATTERNS.search(" ".join(str(part or "") for part in parts)))
 
 SENSITIVE_PATTERNS = re.compile(
     r"alleg|الزام|accus|دعوی|corruption|scam|probe|investigation|جانچ|"
-    r"election|minister|party|court|protest|riot|clash|تصادم|arrest|گرفتار",
+    r"election|minister|party|court|protest|riot|clash|تصادم|arrest|گرفتار|police|crime|criminal|murder|rape|fraud|accused|suspect|victim|bail|chargesheet|convict",
     re.I,
 )
 

@@ -170,7 +170,7 @@ class NewsPipeline:
                     published_at=source.get("published_at"), updated_at=source.get("updated_at"),
                     language=source.get("language", "en"), body_excerpt=source.get("body_excerpt", ""),
                     category=source.get("category", ""))
-                if ResearchAgent.facebook_bucket(probe) == "other":
+                if editorial_exclusion_text(probe.original_headline, probe.body_excerpt):
                     continue
             except Exception:
                 continue
@@ -256,7 +256,7 @@ class NewsPipeline:
         candidate_id = payload["candidate_id"]
         extra_urls = payload.get("evidence_urls", [])
         candidate = self.db.get_candidate(candidate_id) or {}
-        allowed = {"the_hindu": "thehindu.com", "indian_express": "indianexpress.com", "the_wire": "thewire.in"}
+        allowed = {"the_hindu": "thehindu.com", "india_today": "indiatoday.in", "indian_express": "indianexpress.com", "the_wire": "thewire.in"}
         domain = (urlparse(candidate.get("url", "")).hostname or "").lower()
         suffix = allowed.get(candidate.get("source"))
         if not suffix or not (domain == suffix or domain.endswith("." + suffix)):
@@ -270,8 +270,8 @@ class NewsPipeline:
                           published_at=candidate.get("published_at"), updated_at=candidate.get("updated_at"),
                           language=candidate.get("language", "en"), body_excerpt=candidate.get("body_excerpt", ""),
                           category=candidate.get("category", ""))
-        if ResearchAgent.facebook_bucket(probe) == "other":
-            return {"status": "held", "reason": "facebook_category_not_eligible"}
+        if editorial_exclusion_text(probe.original_headline, probe.body_excerpt):
+            return {"status": "held", "reason": "editorial_exclusion"}
         verification = self.verification.verify(
             candidate_id, extra_evidence_urls=extra_urls,
             provided_evidence_text=payload.get("evidence_text"),
@@ -385,7 +385,8 @@ class NewsPipeline:
                 system=("Independently check every English and Roman Urdu claim against the original article. "
                         "Require exact support for names, dates, figures and attribution; proposals remain proposals. "
                         "Reject unsupported claims, uncertainty, mismatches, and prohibited protest coverage. "
-                        "Return JSON with supported boolean and issues array. Never infer missing facts."),
+                        "Also judge whether the news is important rather than trivial or promotional. "
+                        "Return JSON with supported boolean, important boolean and issues array. Never infer missing facts."),
                 user={"article": article[:10000], "english": urdu, "roman_urdu": roman},
                 model=getattr(self.config, "validator_model", None) or self.config.llm_model,
                 max_tokens=900,
@@ -394,6 +395,8 @@ class NewsPipeline:
             return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_unavailable", "error": str(exc)}
         if fact_review.get("supported") is not True:
             return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_not_approved"}
+        if fact_review.get("important") is not True:
+            return {"status": "held", "candidate_id": candidate_id, "reason": "importance_not_approved"}
         notes.append("Independent article-grounded fact review passed: " + json_dumps(fact_review))
         raw = _json(candidate.get("raw_json"), {})
         source_urls = [candidate["url"]] + official_urls

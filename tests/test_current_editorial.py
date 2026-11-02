@@ -54,7 +54,7 @@ def test_excludes_protest_and_vote_theft():
     assert editorial_exclusion_text('Vote theft claims')
     assert not editorial_exclusion_text('Telangana cabinet approves new water project')
     assert not editorial_exclusion_text('Mentoring by established institutions')
-    assert editorial_exclusion_text('Stabbing reported')
+    assert not editorial_exclusion_text('Stabbing reported')
 
 
 def test_original_article_unavailable_holds_even_verified_story(tmp_path):
@@ -72,7 +72,7 @@ def test_original_article_unavailable_holds_even_verified_story(tmp_path):
 
 def test_denied_source_is_not_processed(tmp_path):
     conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
-    c=Candidate(source='india_today',publisher='India Today',url='https://example.com/story',
+    c=Candidate(source='unknown',publisher='Unknown',url='https://example.com/story',
         original_headline='Telangana cabinet approves education policy',published_at=iso(),updated_at=None,
         language='en',body_excerpt='The Telangana cabinet announced an education policy in Hyderabad.',category='politics')
     cid,_=db.insert_candidate(p.research._to_row(c,'hourly'))
@@ -94,7 +94,7 @@ def test_verified_english_roman_card_has_no_unreviewed_photo(tmp_path):
     p.translator.translate=Mock(return_value={'roman_headline':'Telangana cabinet ne taleemi policy manzoor ki',
         'roman_bullets':['Cabinet ne taleemi policy manzoor ki.','Policy Telangana ke schools ke liye hai.','Elan Hyderabad mein kiya gaya.']})
     p.validator.validate=Mock(return_value={'ok':True,'errors':[],'warnings':[],'model_review':{'consistent':True}})
-    p.research.llm.chat_json=Mock(return_value={'supported':True,'issues':[]})
+    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'issues':[]})
     result=p.generate_from_verified(cid,VerificationResult(True,[],['source checked'],'high'))
     assert result['status']=='rendered'
     assert len(result['cards'])==1 and Path(result['cards'][0]).exists()
@@ -117,3 +117,26 @@ def test_factual_review_failure_prevents_rendering(tmp_path):
     p.cards.render=Mock()
     assert p.generate_from_verified(cid,VerificationResult(True,[],[],'high'))['reason']=='fact_review_not_approved'
     p.cards.render.assert_not_called()
+
+
+def test_politics_first_and_named_leader_priority():
+    from nr_news.agents.research import ResearchAgent
+    def sample(title, category='general'):
+        return Candidate(source='india_today',publisher='India Today',url='https://www.indiatoday.in/story',
+            original_headline=title,published_at=iso(),updated_at=None,language='en',body_excerpt=title,category=category)
+    regional_nonpolitics=sample('Hyderabad education department announces teacher training')
+    other_politics=sample('Parliament passes a policy bill')
+    priority_politics=sample('Asaduddin Owaisi speaks in Parliament about policy')
+    assert ResearchAgent.priority(priority_politics)>ResearchAgent.priority(other_politics)>ResearchAgent.priority(regional_nonpolitics)
+    assert ResearchAgent.priority(sample('Rahul Gandhi speaks on government policy')) > ResearchAgent.priority(other_politics)
+
+def test_india_today_source_is_allowed(tmp_path):
+    conf=cfg(tmp_path);db=Database(conf.db_path);desk=NewsPipeline(conf,db)
+    c=Candidate(source='india_today',publisher='India Today',url='https://www.indiatoday.in/news/story/123',
+        original_headline='National sports tournament announces schedule',published_at=iso(),updated_at=None,
+        language='en',body_excerpt='A national sports tournament announced a schedule in an official statement.'*2,category='sports')
+    cid,_=db.insert_candidate(desk.research._to_row(c,'hourly'))
+    desk.verification.verify=Mock(return_value=VerificationResult(False,['verification held'],[],'low'))
+    out=desk.process_job('verify_story',{'candidate_id':cid})
+    assert out['status']=='held' and out['reasons']==['verification held']
+    desk.verification.verify.assert_called_once()
