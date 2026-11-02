@@ -173,85 +173,76 @@ class PublishingAgent:
         else:
             pid = existing["id"]
 
-        last_error: GraphAPIError | None = None
-        for attempt_no in range(1, 4):
-            self.db.update_publish_attempt(pid, status="running", attempts=attempt_no,
-                                           request_started_at=iso(), last_error=None)
-            if attempt_no > 1:
-                # Reconcile first: a timed-out request may already have posted.
-                current = self.db.publish_attempt(idempotency_key)
-                reconciled = self._reconcile(current, page_id, marker, caption_hash)
-                if reconciled["status"] == "success":
-                    return reconciled
+        attempt_no = 1
+        self.db.update_publish_attempt(pid, status="running", attempts=attempt_no,
+                                       request_started_at=iso(), last_error=None)
+        try:
+            response = self.graph.publish_photo(page_id, card_row["file_path"], caption)
+            confirmed_id = response.get("post_id") or response.get("id")
+            if not confirmed_id:
+                raise GraphAPIError("Graph response did not confirm publication", code="NO_POST_ID", transient=True)
+            post_id = str(confirmed_id)
+            ledger_warning = None
             try:
-                response = self.graph.publish_photo(page_id, card_row["file_path"], caption)
-                confirmed_id = response.get("post_id") or response.get("id")
-                if not confirmed_id:
-                    raise GraphAPIError("Graph response did not confirm publication", code="NO_POST_ID", transient=True)
-                post_id = str(confirmed_id)
-                ledger_warning = None
-                try:
-                    self.ledger.finish(idempotency_key, status="confirmed", post_id=post_id)
-                except LedgerUnavailable as exc:
-                    # The pre-upload reservation remains durable and blocks all retries.
-                    ledger_warning = str(exc)
-                    self.db.insert_api_event("facebook", "durable_ledger", "error", ledger_warning,
-                                             details={"editorial_id": editorial_id})
-                self.db.update_publish_attempt(
-                    pid, status="success", response_at=iso(), post_id=post_id,
-                    photo_id=str(response.get("id") or ""), last_error=None,
-                )
-                self.db.set_editorial_status(editorial_id, "published", "graph_api")
-                cluster_id = editorial.get("cluster_id")
-                if cluster_id:
-                    self.db.set_cluster_status(cluster_id, "published", post_id)
-                # Any Graph-confirmed live publication (test or automated)
-                # satisfies the test-post requirement durably in this DB.
-                self.db.set_setting("facebook_test_post_passed", "true")
-                self.db.set_setting("facebook_test_post_id", post_id)
-                self.db.insert_api_event("facebook", "publish_photo", "success",
-                                         "Graph API confirmed photo publication.",
-                                         http_status=200,
-                                         details={"page_id": page_id, "post_id": post_id,
-                                                  "attempt": attempt_no, "test": test})
-                result = {"status": "success", "post_id": post_id, "attempt_id": pid,
-                          "attempts": attempt_no, "caption_marker": marker}
-                if ledger_warning:
-                    result["ledger_warning"] = "Upload confirmed but ledger outcome update requires review."
-                result["instagram"] = self._cross_post_instagram(
-                    page_id, post_id, caption, test=test)
-                return result
-            except GraphAPIError as exc:
-                last_error = exc
-                self.db.insert_api_event("facebook", "publish_photo", "error", str(exc),
-                                         http_status=exc.status, error_code=exc.code,
-                                         details={"page_id": page_id, "attempt": attempt_no})
-                try:
-                    self.ledger.finish(idempotency_key,
-                                       status="uncertain" if exc.transient or exc.code == "NO_POST_ID" else "rejected")
-                except LedgerUnavailable:
-                    pass  # The original reservation still blocks retries.
-                if not exc.transient and exc.code != "NO_POST_ID":
-                    self.db.update_publish_attempt(pid, status="failed", response_at=iso(),
-                                                   last_error=str(exc)[:1000])
-                    return {"status": "failed", "reason": str(exc), "attempt_id": pid}
-                # An upload timeout, 5xx, 429, or missing post ID can mean the
-                # server accepted the photo despite our not receiving proof.
-                # Never retry an ambiguous upload without manual confirmation.
-                self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
+                self.ledger.finish(idempotency_key, status="confirmed", post_id=post_id)
+            except LedgerUnavailable as exc:
+                # The pre-upload reservation remains durable and blocks all retries.
+                ledger_warning = str(exc)
+                self.db.insert_api_event("facebook", "durable_ledger", "error", ledger_warning,
+                                         details={"editorial_id": editorial_id})
+            self.db.update_publish_attempt(
+                pid, status="success", response_at=iso(), post_id=post_id,
+                photo_id=str(response.get("id") or ""), last_error=None,
+            )
+            self.db.set_editorial_status(editorial_id, "published", "graph_api")
+            cluster_id = editorial.get("cluster_id")
+            if cluster_id:
+                self.db.set_cluster_status(cluster_id, "published", post_id)
+            # Any Graph-confirmed live publication (test or automated)
+            # satisfies the test-post requirement durably in this DB.
+            self.db.set_setting("facebook_test_post_passed", "true")
+            self.db.set_setting("facebook_test_post_id", post_id)
+            self.db.insert_api_event("facebook", "publish_photo", "success",
+                                     "Graph API confirmed photo publication.",
+                                     http_status=200,
+                                     details={"page_id": page_id, "post_id": post_id,
+                                              "attempt": attempt_no, "test": test})
+            result = {"status": "success", "post_id": post_id, "attempt_id": pid,
+                      "attempts": attempt_no, "caption_marker": marker}
+            if ledger_warning:
+                result["ledger_warning"] = "Upload confirmed but ledger outcome update requires review."
+            result["instagram"] = self._cross_post_instagram(
+                page_id, post_id, caption, test=test)
+            return result
+        except GraphAPIError as exc:
+            self.db.insert_api_event("facebook", "publish_photo", "error", str(exc),
+                                     http_status=exc.status, error_code=exc.code,
+                                     details={"page_id": page_id, "attempt": attempt_no})
+            try:
+                self.ledger.finish(idempotency_key,
+                                   status="uncertain" if exc.transient or exc.code == "NO_POST_ID" else "rejected")
+            except LedgerUnavailable:
+                pass  # The original reservation still blocks retries.
+            if not exc.transient and exc.code != "NO_POST_ID":
+                self.db.update_publish_attempt(pid, status="failed", response_at=iso(),
                                                last_error=str(exc)[:1000])
-                return {"status": "unknown", "reason": "Network/API result ambiguous; manual reconciliation required.",
-                        "attempt_id": pid}
-            except Exception as exc:
-                try:
-                    self.ledger.finish(idempotency_key, status="uncertain")
-                except LedgerUnavailable:
-                    pass
-                self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
-                                               last_error=f"Unexpected upload error: {type(exc).__name__}")
-                return {"status": "unknown", "reason": "Unexpected upload result; manual reconciliation required.",
-                        "attempt_id": pid}
-        return {"status": "unknown", "reason": str(last_error) if last_error else "retry loop ended", "attempt_id": pid}
+                return {"status": "failed", "reason": str(exc), "attempt_id": pid}
+            # An upload timeout, 5xx, 429, or missing post ID can mean the
+            # server accepted the photo despite our not receiving proof.
+            # Never retry an ambiguous upload without manual confirmation.
+            self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
+                                           last_error=str(exc)[:1000])
+            return {"status": "unknown", "reason": "Network/API result ambiguous; manual reconciliation required.",
+                    "attempt_id": pid}
+        except Exception as exc:
+            try:
+                self.ledger.finish(idempotency_key, status="uncertain")
+            except LedgerUnavailable:
+                pass
+            self.db.update_publish_attempt(pid, status="unknown", response_at=iso(),
+                                           last_error=f"Unexpected upload error: {type(exc).__name__}")
+            return {"status": "unknown", "reason": "Unexpected upload result; manual reconciliation required.",
+                    "attempt_id": pid}
 
     def _cross_post_instagram(self, page_id: str, post_id: str, caption: str,
                               *, test: bool = False) -> dict[str, Any]:

@@ -61,13 +61,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Synthetic English/Roman editorial smoke test (manual branch only)
-        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
-        continue-on-error: true
-        run: PYTHONPATH=. python scripts/probe_english_cards.py
-
-      - name: Verify durable publishing ledger (manual branch only)
-        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+      - name: Verify durable publishing ledger
+        if: github.event_name == 'workflow_dispatch'
         run: python -m nr_news.publication_ledger
 
       - name: Restore durable SQLite database
