@@ -22,8 +22,8 @@ if VENDOR.exists() and str(VENDOR) not in sys.path:
 
 EXCLUSION_PATTERNS = re.compile(
     r"\bprotests?\b|\brall(?:y|ies)\b|impeachment|vote[ -]?(?:theft|chori)|special intensive revision|\bsir\b|\bresign\w*.*demand|مواخذ|ووٹ چوری|"
-    r"murder|قتل|rape|جنسی زیادتی|زیادتی|robbery|ڈکیتی|theft|چوری|dacoity|loot|لُوٹ|firing|فائرنگ|"
-    r"shooting|گولی|gangster|غنڈہ|kidnap|اغوا|abduct|assault|حملہ|stab|چاقو|graphic|dead body|لاش|"
+    r"\bmurder\w*|قتل|\brape\w*|جنسی زیادتی|زیادتی|\brobbery\b|ڈکیتی|\btheft\b|چوری|\bdacoity\b|\bloot\w*|لُوٹ|\bfiring\b|فائرنگ|"
+    r"shooting|گولی|gangster|غنڈہ|kidnap|اغوا|abduct|assault|حملہ|\bstab(?:bed|bing|s)?\b|چاقو|graphic|dead body|لاش|"
     r"crime-news|\bcrime\b|criminal|جرائم|مجرم|suicide|خودکشی|accident|حادثہ|bomb|blast|دھماکہ|terror|دہشت|"
     r"police case|police custody|police arrest|\barrest(?:ed|s)?\b|گرفتار|accused|ملزم|bail|ضمانت|"
     r"\bfir\b|ایف آئی آر|chargesheet|چالان|convict(?:ed|ion)?|سزا|sentenced|jail|جیل|prison|قید|"

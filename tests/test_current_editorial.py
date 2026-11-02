@@ -53,6 +53,8 @@ def test_excludes_protest_and_vote_theft():
     assert editorial_exclusion_text('India bloc protest in Delhi')
     assert editorial_exclusion_text('Vote theft claims')
     assert not editorial_exclusion_text('Telangana cabinet approves new water project')
+    assert not editorial_exclusion_text('Mentoring by established institutions')
+    assert editorial_exclusion_text('Stabbing reported')
 
 
 def test_original_article_unavailable_holds_even_verified_story(tmp_path):
