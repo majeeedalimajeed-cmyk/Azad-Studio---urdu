@@ -61,6 +61,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Check configured backup model access (testing branch only)
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+        env:
+          OPENAI_TEST_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_TEST_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/probe_model_backups.py
+
       - name: Verify durable publishing ledger
         if: github.event_name == 'workflow_dispatch'
         run: python -m nr_news.publication_ledger
