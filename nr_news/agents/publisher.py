@@ -8,7 +8,7 @@ from typing import Any
 from ..config import CONFIG
 from ..db import Database
 from ..facebook import FacebookGraphClient, GraphAPIError
-from ..util import iso, json_dumps, redact, sha256_text
+from ..util import iso, json_dumps, redact, sha256_file, sha256_text
 
 
 class PublishingAgent:
@@ -64,6 +64,21 @@ class PublishingAgent:
             return {"status": "held", "reason": "editorial_not_approved"}
         if card_row.get("visual_status") != "passed":
             return {"status": "held", "reason": "card_visual_inspection_failed"}
+
+        # Existing queued cards may have the old Urdu/byline or stock photos.
+        # Live publication requires a new verified English/Roman editorial and
+        # a freshly-rendered current-layout card with matching file bytes.
+        if not dry_run:
+            digest = card_row.get("sha256") or ""
+            if self.db.get_setting(f"english_roman_verified:{editorial_id}") != "true":
+                return {"status": "held", "reason": "new_format_verification_required"}
+            if not digest or self.db.get_setting(f"card_current_layout:{digest}") != "true":
+                return {"status": "held", "reason": "current_card_rebuild_required"}
+            try:
+                if sha256_file(card_row["file_path"]) != digest:
+                    return {"status": "held", "reason": "current_card_hash_mismatch"}
+            except (KeyError, OSError):
+                return {"status": "held", "reason": "current_card_unavailable"}
 
         page_id = self.graph.confirmed_page_id() if not dry_run else None
         caption_seed = json_dumps({

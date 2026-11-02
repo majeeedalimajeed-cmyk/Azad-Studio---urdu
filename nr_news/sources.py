@@ -125,10 +125,7 @@ class SourceMonitor:
     def monitor_all(self, mode: str = "hourly") -> list[SourceResult]:
         limit = {"breaking": 12, "hourly": 25, "morning": 60}.get(mode, 25)
         results = [
-            self._munsif(limit),
-            self._etemaad_urdu(limit),
             self._hindu(limit),
-            self._india_today(limit),
             self._indian_express(limit),
             self._the_wire(limit),
         ]

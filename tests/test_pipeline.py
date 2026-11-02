@@ -307,6 +307,15 @@ def test_durable_scheduler_queues_morning_comprehensive_scan(tmp_path):
     assert any(json.loads(j["payload_json"]).get("mode") == "morning" for j in jobs)
 
 
+def _verified_current_card(db, editorial_id, card):
+    from nr_news.util import sha256_file
+    path = Path(card["file_path"])
+    path.write_bytes(b"simulated card")
+    card["sha256"] = sha256_file(path)
+    db.set_setting(f"card_current_layout:{card['sha256']}", "true")
+    db.set_setting(f"english_roman_verified:{editorial_id}", "true")
+
+
 def test_facebook_publishing_blocked_without_api_confirmed_page(tmp_path):
     cfg = temp_config(tmp_path, dry_run=False, publish_enabled=True, publish_safety_switch=True,
                       operator_approved=True, verify_approved=True, auto_post_enabled=True,
@@ -323,6 +332,7 @@ def test_facebook_publishing_blocked_without_api_confirmed_page(tmp_path):
     eid, _ = db.insert_editorial(cid, None, content, status="approved")
     card_id = db.insert_card(eid, str(tmp_path / "card.png"), "abc", 1080, 1350, 1, 1, "passed")
     card = {"id": card_id, "file_path": str(tmp_path / "card.png"), "sha256": "abc", "visual_status": "passed"}
+    _verified_current_card(db, eid, card)
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "held"
     assert any(a["status"] == "held" for a in db.publish_attempts())
@@ -425,6 +435,7 @@ def test_graph_api_error_is_recorded_without_false_success(tmp_path):
             return None
 
     pipeline.publisher.graph = FakeGraph()
+    _verified_current_card(db, eid, card)
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "failed"
     attempts = db.publish_attempts()
@@ -484,6 +495,7 @@ def test_successful_publish_cross_posts_to_instagram(tmp_path):
             return "https://www.instagram.com/p/TEST/"
 
     pipeline.publisher.graph = FakeGraph()
+    _verified_current_card(db, eid, card)
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "success"
     assert result["instagram"]["status"] == "success"
@@ -541,7 +553,7 @@ def test_two_photo_card_layout_passes_visual_inspection(tmp_path):
     assert card.audit["visual_inspection"]["checks"]["photo_1_pixels"] is True
     assert card.audit["visual_inspection"]["checks"]["photo_2_pixels"] is True
     assert card.audit["byline"] == BYLINE
-    assert card.audit["visual_inspection"]["checks"]["byline_pixels"] is True
+    assert "byline_pixels" not in card.audit["visual_inspection"]["checks"]
     assert card.audit["visual_inspection"]["checks"]["narrow_latest_news_ribbon"] is True
     assert card.audit["heading_box"][2] - card.audit["heading_box"][0] < 720
 
@@ -585,8 +597,8 @@ def test_pixabay_search_keeps_large_images_with_small_webformat(tmp_path):
 def test_long_headlines_fit_gold_bands(tmp_path):
     cfg = temp_config(tmp_path)
     content = EditorialContent(
-        urdu_headline="STANFEST 2026: بھارت کا سب سے بڑا تخلیق کار اور گیمنگ میلہ بنگلور میں منعقد ہوگا",
-        urdu_bullets=["پہلا نکتہ یہاں درج ہے", "دوسرا نکتہ یہاں درج ہے", "تیسرا نکتہ یہاں درج ہے"],
+        urdu_headline="STANFEST 2026: creators and gaming event to take place in Bengaluru",
+        urdu_bullets=["First point is here", "Second point is here", "Third point is here"],
         roman_headline="STANFEST 2026: India ka sab se bara takhleeq kar aur gaming mela Bengaluru mein",
         roman_bullets=["Pehla point yahan hai", "Doosra point yahan hai", "Teesra point yahan hai"],
         verification_notes=[], source_urls=["https://example.org/story"],
@@ -627,7 +639,7 @@ def test_publish_approved_pending_retries_unpublished_editorial(tmp_path):
     candidate = sample_candidate()
     cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
     content = {
-        "urdu_headline": "اردو سرخی", "urdu_bullets": ["ایک", "دو", "تین"],
+        "urdu_headline": "English headline", "urdu_bullets": ["Point one", "Point two", "Point three"],
         "roman_headline": "Roman headline", "roman_bullets": ["Ek", "Do", "Teen"],
         "verification_notes": [], "source_urls": ["https://example.org/story"],
         "publication_time": iso(),
@@ -988,7 +1000,7 @@ def test_pixabay_query_uses_relevant_story_terms():
     assert "news" not in query.lower().split()
 
 
-def test_media_agent_fills_two_photos_from_pixabay(tmp_path):
+def test_media_agent_does_not_auto_fill_photos_from_pixabay(tmp_path):
     cfg = temp_config(tmp_path, pixabay_enabled=True, pixabay_api_key="fake-key")
     db = Database(cfg.db_path)
     photos = [_demo_media(tmp_path, 1), _demo_media(tmp_path, 2)]
@@ -1010,12 +1022,11 @@ def test_media_agent_fills_two_photos_from_pixabay(tmp_path):
 
     agent = MediaAgent(db, config=cfg, pixabay_client=FakePixabay())
     approved = agent.select_many({"id": "c1"}, query_context={"pixabay_query": "Hyderabad education exam"})
-    assert len(approved) == 2
-    assert {m["provider"] for m in approved} == {"demo"}
-    assert db.query("SELECT COUNT(*) AS n FROM media_assets")[0]["n"] == 2
+    assert approved == []
+    assert db.query("SELECT COUNT(*) AS n FROM media_assets")[0]["n"] == 0
 
 
-def test_text_led_card_has_operator_byline(tmp_path):
+def test_text_led_card_has_no_byline(tmp_path):
     cfg = temp_config(tmp_path)
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     ed = fixture["editorial"]
@@ -1031,7 +1042,7 @@ def test_text_led_card_has_operator_byline(tmp_path):
     )
     cards = CardRenderer(cfg).render_cards(content, "text-led-byline-test")
     assert cards[0].audit["byline"] == BYLINE
-    assert cards[0].audit["visual_inspection"]["checks"]["byline_pixels"] is True
+    assert "byline_pixels" not in cards[0].audit["visual_inspection"]["checks"]
     assert cards[0].audit["visual_inspection"]["checks"]["narrow_latest_news_ribbon"] is True
     assert cards[0].audit["heading_box"][2] - cards[0].audit["heading_box"][0] < 720
     assert cards[0].audit["media_count"] == 0
@@ -1139,6 +1150,7 @@ def test_publish_gate_satisfied_by_standing_operator_approval(tmp_path):
             return None
 
     pipeline.publisher.graph = FakeGraph()
+    _verified_current_card(db, eid, card)
     result = pipeline.publisher.publish(eid, card, dry_run=False)
     assert result["status"] == "success"
     assert db.get_setting("facebook_test_post_passed") == "true"

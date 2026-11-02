@@ -21,7 +21,7 @@ from .models import EditorialContent
 from .util import iso, json_dumps, redact, sha256_file, sha256_text, utcnow
 
 WIDTH, HEIGHT = 1080, 1350
-BYLINE = "By - Abu Aimal and Aimal Akram"
+BYLINE = ""  # Byline removed at the operator's request.
 BLACK = (5, 5, 6)
 PANEL = (12, 11, 10)
 GOLD = (226, 184, 74)
@@ -261,7 +261,7 @@ class CardRenderer:
         d.line((48, y + 12, 72, y + height - 12), fill=GOLD_DARK, width=5)
         d.line((60, y + 12, 84, y + height - 12), fill=GOLD_DARK, width=3)
         sizes = [40, 37, 34, 31, 28, 25, 23] if rtl else [42, 39, 36, 33, 30, 27, 24]
-        max_width = 900
+        max_width = 880
         for size in sizes:
             f = self._font(rtl, size, "Bold")
             lines = self.wrap(d, text, f, max_width, rtl)
@@ -271,7 +271,7 @@ class CardRenderer:
                     and all(self._text_length(d, line, f, rtl) <= max_width for line in lines)):
                 start_y = y + (height - total_h) / 2 + (-8 if rtl else 0)
                 for idx, line in enumerate(lines):
-                    x = WIDTH - 70 if rtl else 75
+                    x = WIDTH - 70 if rtl else 92
                     d.text((x, start_y + idx * line_h), isolate_latin(line) if rtl else line,
                            font=f, fill=DARK_TEXT, anchor="ra" if rtl else "la",
                            **({"direction": "rtl", "language": "ur"} if rtl else {}))
@@ -299,7 +299,8 @@ class CardRenderer:
         x0, y0, x1, y1 = box
         w, h = x1 - x0, y1 - y0
         with Image.open(media["local_path"]) as src:
-            im = ImageOps.fit(src.convert("RGB"), (w, h), method=Image.Resampling.LANCZOS)
+            im = ImageOps.fit(src.convert("RGB"), (w, h), method=Image.Resampling.LANCZOS,
+                              centering=tuple(media.get("crop_center", (0.5, 0.5))))
         mask = Image.new("L", (w, h), 0)
         ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=22, fill=255)
         canvas.paste(im, (x0, y0), mask)
@@ -315,8 +316,14 @@ class CardRenderer:
         verify_logo()
         photos = normalize_media(media, self.config.max_photos_per_card)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Legacy model field names hold the English section until the news
+        # generation pipeline is migrated. Reject old Urdu-script content
+        # instead of rendering it as English or posting the obsolete format.
         urdu_bullets = list(content.urdu_bullets)
         roman_bullets = list(content.roman_bullets)
+        if re.search(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]", " ".join(
+                [content.urdu_headline, *urdu_bullets, content.roman_headline, *roman_bullets])):
+            raise LayoutError("The card requires English and Roman Urdu, not Urdu script")
         if bullet_slice:
             a, b = bullet_slice
             urdu_bullets, roman_bullets = urdu_bullets[a:b], roman_bullets[a:b]
@@ -336,32 +343,33 @@ class CardRenderer:
         d.text((190, 128), "AZAD STUDIO", font=brand_font, fill=MUTED, anchor="la")
 
         # Reference-faithful proportions: a narrower LATEST NEWS ribbon, taller
-        # news-image panels, and no section labels. The exact monogram, byline,
-        # and two-photo support are preserved.
-        heading_y, heading_h, heading_x1 = 166, 82, 700
-        urdu_headline_y, headline_h = 282, 86
-        urdu_bullets_y, urdu_bullets_h = 398, 300
-        urdu_photo_box = (620, 392, 1035, 700)
+        # news-image panels, and no section labels. The exact monogram and
+        # two-photo support are preserved; no personal byline is printed.
+        heading_y, heading_h, heading_x1 = 166, 60, 635
+        urdu_headline_y, headline_h = 248, 64
+        urdu_bullets_y, urdu_bullets_h = 330, 368
+        urdu_photo_box = (620, 330, 1035, 700)
         separator_y = 730
-        roman_headline_y = 766
-        roman_bullets_y, roman_bullets_h = 884, 276
-        roman_photo_box = (620, 876, 1035, 1158)
+        roman_headline_y = 752
+        roman_bullets_y, roman_bullets_h = 835, 325
+        roman_photo_box = (620, 830, 1035, 1158)
         bottom_logo_y = 1164
-        byline_y = 1250
         footer_y = 1298
 
         # Main heading must remain exactly LATEST NEWS, but use the narrower
         # angled ribbon from the supplied reference card.
         red_box = (35, heading_y, heading_x1, heading_y + heading_h)
         angled_banner(canvas, red_box, gradient((red_box[2] - red_box[0], red_box[3] - red_box[1]), RED_LIGHT, RED), border=GOLD_LIGHT)
-        heading_font = self._font(False, 52, "ExtraBold")
-        d.text((150, heading_y + 12), "LATEST NEWS", font=heading_font, fill=WHITE, stroke_width=1, stroke_fill=(60, 0, 0))
-        # Megaphone icon, drawn programmatically.
-        d.polygon([(52, heading_y + 28), (70, heading_y + 28), (88, heading_y + 16),
-                   (88, heading_y + 56), (70, heading_y + 45), (52, heading_y + 45)], fill=WHITE)
-        d.arc((50, heading_y + 38, 74, heading_y + 70), 270, 90, fill=WHITE, width=4)
+        heading_font = self._font(False, 38, "ExtraBold")
+        d.text((125, heading_y + 7), "LATEST NEWS", font=heading_font, fill=WHITE, stroke_width=1, stroke_fill=(60, 0, 0))
+        # Scaled-down megaphone icon fits the shorter red strip.
+        d.polygon([(52, heading_y + 21), (67, heading_y + 21), (82, heading_y + 12),
+                   (82, heading_y + 43), (67, heading_y + 35), (52, heading_y + 35)], fill=WHITE)
+        d.arc((51, heading_y + 30, 70, heading_y + 53), 270, 90, fill=WHITE, width=3)
 
-        self._draw_headline(canvas, content.urdu_headline, True, urdu_headline_y, headline_h)
+        # The original card design is retained; its first section now carries
+        # English in left-to-right text (the model's legacy field name remains).
+        self._draw_headline(canvas, content.urdu_headline, False, urdu_headline_y, headline_h)
 
         # Up to two rights-cleared photos occupy reserved panels, mirroring the
         # reference card: one beside the Urdu copy, one beside the Roman copy.
@@ -369,15 +377,15 @@ class CardRenderer:
         urdu_photo = photos[0] if photos else None
         roman_photo = photos[1] if len(photos) > 1 else None
         urdu_max_width = 900
-        urdu_text_x = WIDTH - 135
-        urdu_bullet_x = 1025
+        urdu_text_x = 135
+        urdu_bullet_x = 88
         if urdu_photo:
             self._draw_photo(canvas, urdu_photo, urdu_photo_box)
             photo_boxes.append(urdu_photo_box)
-            urdu_max_width = 500
-            urdu_text_x = 590
-            urdu_bullet_x = 610
-        urdu_end = self._draw_bullets(canvas, urdu_bullets, True, urdu_bullets_y,
+            urdu_max_width = 470
+            urdu_text_x = 120
+            urdu_bullet_x = 88
+        urdu_end = self._draw_bullets(canvas, urdu_bullets, False, urdu_bullets_y,
                                       urdu_bullets_h, urdu_max_width,
                                       urdu_text_x, urdu_bullet_x, compact=bool(urdu_photo))
         if urdu_end > 706:
@@ -406,9 +414,6 @@ class CardRenderer:
             raise LayoutError("Roman Urdu bullet area overflowed its reserved region")
 
         bottom_logo_box = paste_logo(canvas, logo, WIDTH // 2, bottom_logo_y, 62)
-        byline_box = (250, byline_y - 22, 830, byline_y + 22)
-        byline_font = self._font(False, 18, "SemiBold")
-        d.text((WIDTH // 2, byline_y), BYLINE, font=byline_font, fill=GOLD, anchor="mm")
         footer_font = self._font(False, 15, "Medium")
         footer = f"VERIFIED REPORT  •  {page_number}/{page_count}  •  AZAD STUDIO"
         d.text((WIDTH // 2, footer_y), footer, font=footer_font, fill=MUTED, anchor="mm")
@@ -416,8 +421,7 @@ class CardRenderer:
         canvas.save(output_path, format="PNG", optimize=True)
         digest = sha256_file(output_path)
         visual = self.visual_inspection(output_path, top_logo_box, bottom_logo_box,
-                                        photo_boxes=photo_boxes, byline_box=byline_box,
-                                        heading_box=red_box)
+                                        photo_boxes=photo_boxes, heading_box=red_box)
         audit = {
             "rendered_at": iso(),
             "logo_asset": str(self.config.logo_path),

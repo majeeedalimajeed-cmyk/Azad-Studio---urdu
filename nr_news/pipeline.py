@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
+import re
+from bs4 import BeautifulSoup
 from typing import Any
 
 from .agents import (CardAgent, MediaAgent, PublishingAgent, ResearchAgent,
@@ -157,6 +160,20 @@ class NewsPipeline:
 
         editorials = sorted(approved, key=_rank, reverse=True)[:limit]
         for editorial in editorials:
+            # Never revive an old-format or ineligible queued post.
+            if not self.config.dry_run and self.db.get_setting(f"english_roman_verified:{editorial['id']}") != "true":
+                continue
+            source = self.db.get_candidate(editorial["candidate_id"]) or {}
+            try:
+                probe = Candidate(source=source.get("source", ""), publisher=source.get("publisher", ""),
+                    url=source.get("url", ""), original_headline=source.get("original_headline", ""),
+                    published_at=source.get("published_at"), updated_at=source.get("updated_at"),
+                    language=source.get("language", "en"), body_excerpt=source.get("body_excerpt", ""),
+                    category=source.get("category", ""))
+                if ResearchAgent.facebook_bucket(probe) == "other":
+                    continue
+            except Exception:
+                continue
             success = self.db.one(
                 "SELECT id FROM publish_attempts WHERE editorial_id=? AND status='success'",
                 (editorial["id"],),
@@ -238,6 +255,23 @@ class NewsPipeline:
             return {"status": "ignored", "reason": "unknown_job_type"}
         candidate_id = payload["candidate_id"]
         extra_urls = payload.get("evidence_urls", [])
+        candidate = self.db.get_candidate(candidate_id) or {}
+        allowed = {"the_hindu": "thehindu.com", "indian_express": "indianexpress.com", "the_wire": "thewire.in"}
+        domain = (urlparse(candidate.get("url", "")).hostname or "").lower()
+        suffix = allowed.get(candidate.get("source"))
+        if not suffix or not (domain == suffix or domain.endswith("." + suffix)):
+            return {"status": "held", "reason": "source_not_in_operator_list"}
+        text = " ".join((candidate.get("original_headline", ""), candidate.get("body_excerpt", ""))).lower()
+        # The two one-off posts predate this scheduler's database records.
+        if ("aicte" in text and ("modrobs" in text or "four schemes" in text or "four major schemes" in text)) or ("treated" in text and "water" in text and ("revanth" in text or "green tanker" in text)):
+            return {"status": "held", "reason": "story_already_posted_manually"}
+        probe = Candidate(source=candidate.get("source", ""), publisher=candidate.get("publisher", ""),
+                          url=candidate.get("url", ""), original_headline=candidate.get("original_headline", ""),
+                          published_at=candidate.get("published_at"), updated_at=candidate.get("updated_at"),
+                          language=candidate.get("language", "en"), body_excerpt=candidate.get("body_excerpt", ""),
+                          category=candidate.get("category", ""))
+        if ResearchAgent.facebook_bucket(probe) == "other":
+            return {"status": "held", "reason": "facebook_category_not_eligible"}
         verification = self.verification.verify(
             candidate_id, extra_evidence_urls=extra_urls,
             provided_evidence_text=payload.get("evidence_text"),
@@ -262,15 +296,51 @@ class NewsPipeline:
             chunks.append(text)
         return " ".join(chunks)
 
+    def _read_original_article(self, candidate: dict[str, Any]) -> str:
+        result = self.evidence.client.get(candidate.get("url", ""))
+        if not result.ok:
+            return ""
+        source_host = (urlparse(candidate.get("url", "")).hostname or "").lower()
+        result_host = (urlparse(result.url).hostname or "").lower()
+        if source_host.removeprefix("www.") != result_host.removeprefix("www."):
+            return ""
+        soup = BeautifulSoup(result.text, "html.parser")
+        container = soup.find("article") or soup.find("main")
+        if not container:
+            return ""
+        for unwanted in container.select("nav, aside, footer, script, style, form, [class*='related'], [class*='recommend']"):
+            unwanted.decompose()
+        heading = container.find("h1") or soup.find("h1")
+        parts = [heading.get_text(" ", strip=True)] if heading else []
+        for paragraph in container.find_all("p"):
+            text = clean_text(paragraph.get_text(" ", strip=True), 3000)
+            if len(text) >= 45:
+                parts.append(text)
+        return clean_text(" ".join(parts), 12000)
+
     def generate_from_verified(self, candidate_id: str, verification: VerificationResult,
                                extra_urls: list[str] | None = None) -> dict[str, Any]:
         candidate = self.db.get_candidate(candidate_id)
         if not candidate:
             return {"status": "held", "reason": "candidate_not_found"}
+        # Read the original article, not just the RSS title/excerpt. Fail
+        # closed when blocked, paywalled, too short, or not the same story.
+        article = self._read_original_article(candidate)
+        title_words = set(re.findall(r"[a-z0-9]{4,}", candidate.get("original_headline", "").lower()))
+        article_words = set(re.findall(r"[a-z0-9]{4,}", article.lower()))
+        if len(article) < 600 or len(title_words & article_words) < max(2, len(title_words)//3):
+            return {"status": "held", "candidate_id": candidate_id,
+                    "reason": "original_article_unreadable_or_mismatched"}
+        if editorial_exclusion_text(candidate.get("original_headline", ""), article):
+            return {"status": "held", "candidate_id": candidate_id,
+                    "reason": "article_matches_editorial_exclusion"}
         official_urls = self._official_urls(candidate, extra_urls)
-        evidence_text = self._official_evidence_text(official_urls)
+        official_evidence = self._official_evidence_text(official_urls)
+        evidence_text = article + " " + official_evidence
+        # Model reads the real article, while the original DB record stays immutable.
+        candidate_for_generation = dict(candidate, body_excerpt=article[:10000])
         try:
-            urdu = self.research.summarize_urdu(candidate, verification)
+            urdu = self.research.summarize_urdu(candidate_for_generation, verification)
         except AgentUnavailable as exc:
             self.db.add_review(candidate_id, verification.cluster_id, "urdu_generation_unavailable",
                                {"reason": str(exc), "verification": verification.to_dict()})
@@ -296,7 +366,9 @@ class NewsPipeline:
         validation = self.validator.validate(
             urdu, roman, facts=facts, verification_notes=notes, evidence_text=evidence_text,
         )
-        if not validation["ok"]:
+        if not validation["ok"] or not isinstance(validation.get("model_review"), dict) or validation["model_review"].get("consistent") is not True:
+            if validation["ok"]:
+                validation["errors"].append("Independent English/Roman translation review unavailable")
             self.db.add_review(candidate_id, verification.cluster_id, "translation_validation_failed",
                                {"errors": validation["errors"], "warnings": validation["warnings"],
                                 "urdu": urdu, "roman": roman})
@@ -306,13 +378,30 @@ class NewsPipeline:
             return {"status": "held", "candidate_id": candidate_id,
                     "reason": "Translation validation failed", "errors": validation["errors"]}
 
+        # A separate source-grounded review must explicitly approve every
+        # claim in both languages. No approval on missing/error/uncertain output.
+        try:
+            fact_review = self.research.llm.chat_json(
+                system=("Independently check every English and Roman Urdu claim against the original article. "
+                        "Require exact support for names, dates, figures and attribution; proposals remain proposals. "
+                        "Reject unsupported claims, uncertainty, mismatches, and prohibited protest coverage. "
+                        "Return JSON with supported boolean and issues array. Never infer missing facts."),
+                user={"article": article[:10000], "english": urdu, "roman_urdu": roman},
+                model=getattr(self.config, "validator_model", None) or self.config.llm_model,
+                max_tokens=900,
+            )
+        except AgentUnavailable:
+            return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_unavailable"}
+        if fact_review.get("supported") is not True:
+            return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_not_approved"}
+        notes.append("Independent article-grounded fact review passed: " + json_dumps(fact_review))
         raw = _json(candidate.get("raw_json"), {})
         source_urls = [candidate["url"]] + official_urls
         source_urls = list(dict.fromkeys(source_urls))
-        media_list = self.media.select_many(
-            candidate, raw.get("media"),
-            query_context={"urdu": urdu, "facts": facts, "pixabay_query": raw.get("pixabay_query")},
-        )
+        # Automated runs use a text-only card. Relevant, rights-cleared photos
+        # can be added through a separately reviewed manual workflow; search
+        # results and old cached media are never posted automatically.
+        media_list: list[dict[str, Any]] = []
         content = EditorialContent(
             urdu_headline=clean_text(urdu["urdu_headline"], 240),
             urdu_bullets=[clean_text(x, 320) for x in urdu["urdu_bullets"]],
@@ -346,6 +435,7 @@ class NewsPipeline:
         if not created:
             return {"status": "duplicate_editorial", "candidate_id": candidate_id,
                     "editorial_id": editorial_id}
+        self.db.set_setting(f"english_roman_verified:{editorial_id}", "true")
 
         rendered = self.cards.render(editorial_id, content, media=media_list or None)
         publish_results: list[dict[str, Any]] = []

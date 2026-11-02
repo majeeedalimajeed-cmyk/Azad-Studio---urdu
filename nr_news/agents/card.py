@@ -30,6 +30,7 @@ class CardAgent:
                 editorial_id, card.path, card.sha256, card.width, card.height,
                 card.page_number, card.page_count, card.visual_status,
             )
+            self.db.set_setting(f"card_current_layout:{card.sha256}", "true")
             self.db.insert_api_event("agent_d", "render_card", "passed",
                                      "Card rendered with verified exact supplied monogram",
                                      details={"file": card.path, "sha256": card.sha256,

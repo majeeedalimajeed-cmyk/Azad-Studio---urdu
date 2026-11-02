@@ -9,12 +9,12 @@ from ..llm import AgentUnavailable, LLMClient
 from ..util import clean_text, numeric_atoms
 
 TRANSLATOR_SYSTEM = """You are Agent C, a SEPARATE Roman Urdu translation agent.
-Your only source of meaning is the approved Urdu-script headline, bullets, fact inventory and verification notes.
+Your only source of meaning is the approved English headline, bullets, fact inventory and verification notes. The legacy keys say Urdu but contain English.
 Translate into natural Roman Urdu without adding opinions, explanations, entities or facts.
 Rules:
 - Preserve every name, location, title, date, number and unit accurately.
 - Preserve uncertainty exactly: alleged, proposed, attributed, developing, and phrases such as 'wherever feasible'.
-- The Roman Urdu bullet count MUST equal the Urdu bullet count.
+- The Roman Urdu bullet count MUST equal the English bullet count.
 - Keep spelling of names/locations consistent and use common Latin spellings for acronyms.
 - Do not use publisher names and do not invent a quotation.
 - Return ONLY one JSON object with keys: roman_headline (string), roman_bullets (array),
@@ -22,7 +22,7 @@ Rules:
   no_new_facts (boolean).
 """
 
-REVIEWER_SYSTEM = """You are an independent Urdu/Roman Urdu consistency reviewer.
+REVIEWER_SYSTEM = """You are an independent English/Roman Urdu consistency reviewer.
 Compare the two versions against the fact inventory and verification notes.
 Do not rewrite. Return ONLY JSON: {consistent:boolean, issues:[strings], name_checks:[strings], number_checks:[strings]}.
 Flag any changed meaning, added opinion/explanation/fact, omitted uncertainty, wrong name, date, figure or title.
@@ -52,8 +52,8 @@ class RomanUrduTranslatorAgent:
         if not self.llm.available:
             raise AgentUnavailable("Separate Roman Urdu translation model not configured")
         payload = {
-            "approved_urdu_headline": urdu["urdu_headline"],
-            "approved_urdu_bullets": urdu["urdu_bullets"],
+            "approved_english_headline": urdu["urdu_headline"],
+            "approved_english_bullets": urdu["urdu_bullets"],
             "fact_inventory": facts or {},
             "verification_notes": verification_notes or [],
         }
@@ -109,14 +109,6 @@ class TranslationValidator:
                 errors.append(f"Mapped Urdu entity not present: {u}")
             elif r.lower() not in roman_text.lower():
                 errors.append(f"Mapped Roman entity not present: {r}")
-
-        # Any Latin acronym/name in Urdu copy must survive into Roman Urdu unless
-        # explicitly transliterated through entity_map.
-        latin_names = {m for m in re.findall(r"\b[A-Z][A-Za-z.-]{1,}\b", urdu_text) if m.lower() not in {"urdu"}}
-        mapped_urdu = " ".join(str(x.get("urdu", "")) for x in roman.get("entity_map", []) or [])
-        for name in latin_names:
-            if name.lower() not in roman_text.lower() and name.lower() not in mapped_urdu.lower():
-                errors.append(f"Proper name dropped in Roman Urdu: {name}")
 
         combined_roman = roman_text.lower()
         for urdu_marker, expected_phrases in UNCERTAINTY_HINTS.items():

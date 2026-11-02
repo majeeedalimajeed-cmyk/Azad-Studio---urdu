@@ -1,10 +1,9 @@
 """Agent E — rights-aware news photographs, up to two per card.
 
-Source-supplied images are used only with explicit credit, license, permission
-and a local file. When fewer than two rights-cleared images are supplied, the
-Pixabay Content License provider can add relevant, safe, non-AI photographs.
-If no relevant photograph is available, the renderer uses a clean text-led card
-rather than inventing or hot-linking an image.
+Images require individually recorded relevance and rights review, explicit
+credit, licence and a local file. Stock search results are not auto-selected.
+If no reviewed relevant photograph is available, the renderer uses a clean
+text-led card rather than inventing or hot-linking an image.
 """
 from __future__ import annotations
 
@@ -39,7 +38,10 @@ class MediaAgent:
         return []
 
     def _approve_one(self, candidate: dict[str, Any], media: dict[str, Any]) -> dict[str, Any] | None:
-        required = ("url", "credit", "license_ref", "local_path")
+        # Licences and search terms alone do not establish editorial relevance.
+        # Accept only assets individually reviewed for this specific story.
+        required = ("url", "credit", "license_ref", "local_path",
+                    "relevance_reviewed_by", "relevance_note", "rights_reviewed_by")
         missing = [k for k in required if not media.get(k)]
         if missing:
             self.db.insert_api_event("agent_e", "media_select", "held",
@@ -82,6 +84,9 @@ class MediaAgent:
             "query": media.get("query"),
             "tags": media.get("tags"),
             "pixabay_id": media.get("pixabay_id"),
+            "relevance_reviewed_by": media["relevance_reviewed_by"],
+            "relevance_note": media["relevance_note"],
+            "rights_reviewed_by": media["rights_reviewed_by"],
         }
         self.db.execute(
             "INSERT INTO media_assets(id,url,local_path,credit,license_ref,permission_ref,sha256,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -124,24 +129,11 @@ class MediaAgent:
             if len(approved) >= limit:
                 break
 
-        if len(approved) < limit and self.pixabay.available:
-            context = query_context or {}
-            query = context.get("pixabay_query") or self.pixabay.build_query(
-                candidate,
-                urdu=context.get("urdu"),
-                facts=context.get("facts") or (context.get("editorial") or {}).get("facts"),
-            )
-            hits = self.pixabay.search(query)
-            for hit in hits:
-                if len(approved) >= limit:
-                    break
-                downloaded = self.pixabay.download(hit, query)
-                add(self._approve_one(candidate, downloaded) if downloaded else None)
-
+        # Do not auto-fill missing slots from stock search: matching search
+        # terms does not prove that a photo represents this particular story.
+        # Reviewed, licensed stock images may still be supplied explicitly.
         if not approved:
-            reason = ("No rights-cleared photograph supplied and Pixabay returned no relevant image; "
-                      "text-led card used." if self.pixabay.available else
-                      "No rights-cleared photograph supplied and Pixabay is not configured; text-led card used.")
+            reason = "No individually reviewed, rights-cleared relevant photo supplied; text-led card used."
             self.db.insert_api_event("agent_e", "media_select_many", "skipped", reason,
                                      details={"candidate_id": candidate.get("id"),
                                               "supplied": len(supplied), "approved": 0})

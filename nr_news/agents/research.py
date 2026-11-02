@@ -60,19 +60,10 @@ CONTROVERSIAL_PROTEST = re.compile(
     r"impeachment|resign\w+ (demand|call)|demand\w* .*resign|vote chori|vote theft|"
     r"مواخذ|استعفیٰ|ووٹ چوری", re.I)
 
-RESEARCH_SYSTEM = """You are Agent A, an Urdu news research and extraction agent.
-You receive ONLY a short excerpt from an original report, its headline, and verified evidence notes.
-Write a concise, original Urdu-script headline and 3 to 5 Urdu bullets.
-Rules:
-- Preserve names, dates, figures, locations, titles and attribution exactly.
-- Distinguish confirmed, alleged, proposed, attributed and developing claims.
-- A proposal is not an approved decision; an allegation is not a fact.
-- Never invent a fact, quote, source, statistic, motive or image.
-- Do not copy article text verbatim and do not mention the publisher on the card.
-- Keep bullets short enough for a 1080x1350 news card.
-- Return ONLY one JSON object with keys: urdu_headline (string), urdu_bullets (array of 3-5 strings),
-  verification_notes (array of strings), facts (object with arrays names, dates, figures, locations,
-  and a string claim_status), requires_human_review (boolean).
+RESEARCH_SYSTEM = """You are an English news editor. Use only the supplied original article and verified evidence.
+Write a concise original English headline and 3–5 short English bullets. The schema has legacy key names: put English in urdu_headline and urdu_bullets, NOT Urdu script.
+Preserve names, dates, figures, locations, titles, uncertainties and attribution. Never present a proposal as an approved decision. Never invent facts, sources or quotations. Do not copy wording verbatim. Flag any doubt for human review.
+Return JSON keys urdu_headline, urdu_bullets, verification_notes, facts (arrays names, dates, figures, locations and string claim_status), and requires_human_review.
 """
 
 
@@ -83,7 +74,7 @@ class ResearchAgent:
         self.config = config
 
     # Sources the desk wants first for Hyderabad/Telangana, India and world.
-    PREFERRED_PUBLISHERS = ("The Hindu", "The Indian Express", "India Today")
+    PREFERRED_PUBLISHERS = ("The Hindu", "The Indian Express", "The Wire")
 
     @staticmethod
     def priority(candidate: Candidate) -> int:
@@ -236,7 +227,7 @@ class ResearchAgent:
             "updated_at": candidate.get("updated_at"),
             "verification_evidence": verification.evidence,
             "verification_reasons": verification.reasons,
-            "output_language": "Urdu script (Nastaliq-compatible Unicode)",
+            "output_language": "English; use legacy JSON keys urdu_headline and urdu_bullets",
         }
         data = self.llm.chat_json(system=RESEARCH_SYSTEM, user=payload, model=self.config.llm_model)
         self._validate_output(data)
