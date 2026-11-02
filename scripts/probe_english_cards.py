@@ -26,6 +26,12 @@ with TemporaryDirectory() as tmp:
         'The decision was announced after the cabinet meeting in Hyderabad. '
         'The education department will work with districts on the implementation plan. ')
     desk._read_original_article=lambda row: paragraph*2
+    original_call=desk.research.llm.chat_json
+    def debug_call(**kwargs):
+        output=original_call(**kwargs)
+        print('SYNTHETIC MODEL KEYS:', sorted(output.keys()), 'facts type:', type(output.get('facts')).__name__)
+        return output
+    desk.research.llm.chat_json=debug_call
     verification=VerificationResult(True,[],['Synthetic test source supplied for local probe.'],'high')
     result=desk.generate_from_verified(cid,verification)
     print('SYNTHETIC TEST RESULT:',result.get('status'),result.get('reason'))
