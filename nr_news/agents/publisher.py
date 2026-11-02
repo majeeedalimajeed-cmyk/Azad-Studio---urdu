@@ -277,6 +277,7 @@ class PublishingAgent:
                                          details={"post_id": post_id})
                 return {"status": "failed", "reason": "no_public_image_url"}
             creation_id = self.graph.ig_create_container(ig_id, image_url, caption)
+            status = None
             for _ in range(6):
                 status = self.graph.ig_container_status(creation_id)
                 if status == "FINISHED":
@@ -285,9 +286,15 @@ class PublishingAgent:
                     raise GraphAPIError("Instagram container processing failed",
                                         code="CONTAINER_ERROR")
                 time.sleep(5)
+            if status != "FINISHED":
+                return {"status": "held", "reason": "instagram_container_not_ready"}
             media_id = self.graph.ig_publish_container(ig_id, creation_id)
-            permalink = self.graph.ig_permalink(media_id)
+            # Record the confirmed media ID before any optional metadata call.
             self.db.set_setting(f"instagram_media_for_{post_id}", media_id)
+            try:
+                permalink = self.graph.ig_permalink(media_id)
+            except GraphAPIError:
+                permalink = None
             if permalink:
                 self.db.set_setting(f"instagram_permalink_for_{post_id}", permalink)
             self.db.insert_api_event("instagram", "publish", "success",

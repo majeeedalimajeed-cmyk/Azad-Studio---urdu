@@ -1292,3 +1292,38 @@ def test_both_model_failures_fail_closed(tmp_path,monkeypatch):
     monkeypatch.setattr(module.requests,'post',lambda *a,**k:Response())
     with pytest.raises(module.AgentUnavailable,match='Both editorial model providers'):
         module.LLMClient(cfg).chat_json(system='JSON',user={})
+
+
+def test_instagram_pending_container_is_never_published(tmp_path, monkeypatch):
+    from nr_news.agents.publisher import PublishingAgent
+    cfg = temp_config(tmp_path, instagram_enabled=True)
+    db = Database(cfg.db_path)
+    class Graph:
+        def instagram_account_id(self, page): return "ig"
+        def post_image_url(self, post): return "https://example.org/card.jpg"
+        def ig_create_container(self, *args): return "container"
+        def ig_container_status(self, *args): return "IN_PROGRESS"
+        def ig_publish_container(self, *args): raise AssertionError("pending container was published")
+    monkeypatch.setattr('nr_news.agents.publisher.time.sleep', lambda _: None)
+    result = PublishingAgent(db=db, graph=Graph(), config=cfg)._cross_post_instagram('page','post','caption')
+    assert result == {'status': 'held', 'reason': 'instagram_container_not_ready'}
+
+
+def test_instagram_confirmed_media_survives_permalink_error(tmp_path):
+    from nr_news.agents.publisher import PublishingAgent
+    from nr_news.facebook import GraphAPIError
+    cfg = temp_config(tmp_path, instagram_enabled=True)
+    db = Database(cfg.db_path)
+    class Graph:
+        def instagram_account_id(self, page): return "ig"
+        def post_image_url(self, post): return "https://example.org/card.jpg"
+        def ig_create_container(self, *args): return "container"
+        def ig_container_status(self, *args): return "FINISHED"
+        def ig_publish_container(self, *args): return "media"
+        def ig_permalink(self, *args): raise GraphAPIError('metadata unavailable')
+    agent = PublishingAgent(db=db, graph=Graph(), config=cfg)
+    result = agent._cross_post_instagram('page','post','caption')
+    assert result['status'] == 'success'
+    assert result['media_id'] == 'media'
+    assert db.get_setting('instagram_media_for_post') == 'media'
+    assert agent._cross_post_instagram('page','post','caption')['status'] == 'already_published'

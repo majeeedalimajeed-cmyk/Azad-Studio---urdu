@@ -42,7 +42,7 @@ jobs:
       NR_LLM_RETRY_MAX_SECONDS: "15"
       NR_PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       NR_PIXABAY_ENABLED: "false"
-      NR_INSTAGRAM_ENABLED: "false"
+      NR_INSTAGRAM_ENABLED: ${{ vars.NR_INSTAGRAM_ENABLED || 'false' }}
       NR_VIDEO_ENABLED: "false"
       NR_YOUTUBE_ENABLED: "false"
       NR_YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
