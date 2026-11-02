@@ -17,6 +17,7 @@ Rules:
 - The Roman Urdu bullet count MUST equal the English bullet count.
 - Keep spelling of names/locations consistent and use common Latin spellings for acronyms.
 - Do not use publisher names and do not invent a quotation.
+- In entity_map and uncertainty_map, each urdu field must be an exact verbatim substring of the approved English headline or bullets, NOT an expansion from the fact inventory. Each roman field must be an exact verbatim substring of the Roman headline or bullets. Use an empty array if no exact mapping is available.
 - Return ONLY one JSON object with keys: roman_headline (string), roman_bullets (array),
   entity_map (array of {urdu, roman} objects), uncertainty_map (array of {urdu, roman} objects),
   no_new_facts (boolean).
