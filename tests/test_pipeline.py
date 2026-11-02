@@ -1244,3 +1244,18 @@ def test_llm_recovers_json_validation_error_without_weakening_parse(tmp_path,mon
     assert module.LLMClient(cfg).chat_json(system='JSON only',user={})=={'supported':True}
     assert 'response_format' not in calls[1]
     with pytest.raises(module.AgentUnavailable):module.LLMClient._parse_json('{not valid json}')
+
+
+def test_llm_daily_quota_holds_without_long_retry(tmp_path,monkeypatch):
+    from nr_news import llm as module
+    cfg=temp_config(tmp_path,llm_api_key='test-key',llm_model='example-model')
+    calls=[]
+    class Response:
+        status_code=429
+        text='Rate limit reached: tokens per day. Please try again later.'
+    def post(*args,**kwargs):
+        calls.append(1);return Response()
+    monkeypatch.setattr(module.requests,'post',post)
+    with pytest.raises(module.AgentUnavailable,match='daily quota'):
+        module.LLMClient(cfg).chat_json(system='JSON only',user={})
+    assert len(calls)==1

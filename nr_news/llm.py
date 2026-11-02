@@ -102,6 +102,11 @@ class LLMClient:
                     # consume the rate-limit retry budget.
                     use_json_mode = False
                     continue
+                if response.status_code == 429 and any(term in body_text.lower() for term in (
+                    "tokens per day", "requests per day", "daily quota", "daily limit")):
+                    # Multi-minute retries cannot fix a daily budget limit and
+                    # stall the whole queue; the next scheduled scan can retry.
+                    raise AgentUnavailable("LLM daily quota exhausted; editorial held for later review")
                 if (response.status_code == 429 or response.status_code >= 500) and rate_attempt < max_retries:
                     self._sleep(self._retry_delay(response, rate_attempt))
                     rate_attempt += 1
