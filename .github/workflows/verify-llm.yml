@@ -5,14 +5,24 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      NR_SKIP_DOTENV: "1"
+      NR_LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NR_LLM_API_BASE: https://generativelanguage.googleapis.com/v1beta/openai
+      NR_LLM_MODEL: gemini-3.5-flash-lite
+      NR_ROMAN_URDU_MODEL: gemini-3.5-flash-lite
+      NR_VALIDATOR_MODEL: gemini-3.5-flash-lite
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install requests
-      - name: Check backup model pool without publishing
-        env:
-          TEST_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TEST_GROQ_KEY: ${{ secrets.GROK_API_KEY }}
-        run: python scripts/check_model_pool.py
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Test real article on spare model without publishing
+        run: PYTHONPATH=. python scripts/test_lite_model.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: editorial-model-preview
+          path: diagnostic-results/
+          if-no-files-found: ignore
