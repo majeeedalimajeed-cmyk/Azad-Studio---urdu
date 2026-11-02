@@ -30,11 +30,16 @@ jobs:
       NR_FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
       NR_FB_USER_ACCESS_TOKEN: ${{ secrets.FB_USER_ACCESS_TOKEN }}
       NR_FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-      NR_LLM_API_KEY: ${{ secrets.GROK_API_KEY }}
-      NR_LLM_API_BASE: ${{ vars.NR_LLM_API_BASE }}
-      NR_LLM_MODEL: ${{ vars.NR_LLM_MODEL }}
-      NR_ROMAN_URDU_MODEL: ${{ vars.NR_ROMAN_URDU_MODEL }}
-      NR_VALIDATOR_MODEL: ${{ vars.NR_VALIDATOR_MODEL }}
+      NR_LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NR_LLM_API_BASE: https://generativelanguage.googleapis.com/v1beta/openai
+      NR_LLM_MODEL: gemini-3.5-flash
+      NR_ROMAN_URDU_MODEL: gemini-3.5-flash
+      NR_VALIDATOR_MODEL: gemini-3.5-flash
+      NR_LLM_BACKUP_API_KEY: ${{ secrets.GROK_API_KEY }}
+      NR_LLM_BACKUP_API_BASE: https://api.groq.com/openai/v1
+      NR_LLM_BACKUP_MODEL: openai/gpt-oss-120b
+      NR_LLM_MAX_RETRIES: "2"
+      NR_LLM_RETRY_MAX_SECONDS: "15"
       NR_PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
       NR_PIXABAY_ENABLED: "false"
       NR_INSTAGRAM_ENABLED: "false"

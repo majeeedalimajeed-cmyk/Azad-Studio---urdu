@@ -6,6 +6,7 @@ missing credentials cause stories to be held for review rather than invented.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import re
 import time
 from typing import Any
@@ -26,7 +27,9 @@ class LLMClient:
 
     @property
     def available(self) -> bool:
-        return bool(self.config.llm_api_key and self.config.llm_model)
+        return bool((self.config.llm_api_key and self.config.llm_model) or
+                    (getattr(self.config, "llm_backup_api_key", None) and
+                     getattr(self.config, "llm_backup_model", None)))
 
     def _sleep(self, seconds: float) -> None:
         time.sleep(max(0.0, seconds))
@@ -59,7 +62,29 @@ class LLMClient:
 
     def chat_json(self, *, system: str, user: dict[str, Any], model: str | None = None,
                   max_tokens: int = 1800) -> dict[str, Any]:
-        if not self.available:
+        primary_error = None
+        if self.config.llm_api_key and (model or self.config.llm_model):
+            try:
+                return self._chat_json_primary(system=system, user=user, model=model, max_tokens=max_tokens)
+            except AgentUnavailable as exc:
+                primary_error = str(exc)
+        backup_key = getattr(self.config, "llm_backup_api_key", None)
+        backup_model = getattr(self.config, "llm_backup_model", None)
+        if backup_key and backup_model:
+            backup_config = replace(self.config, llm_api_key=backup_key,
+                llm_api_base=self.config.llm_backup_api_base, llm_model=backup_model,
+                translator_model=backup_model, validator_model=backup_model,
+                llm_backup_api_key=None, llm_backup_model=None)
+            try:
+                return LLMClient(backup_config)._chat_json_primary(
+                    system=system, user=user, model=backup_model, max_tokens=max_tokens)
+            except AgentUnavailable as exc:
+                raise AgentUnavailable("Both editorial model providers are unavailable; story held") from exc
+        raise AgentUnavailable(primary_error or "LLM model/key not configured; generation held for review")
+
+    def _chat_json_primary(self, *, system: str, user: dict[str, Any], model: str | None = None,
+                           max_tokens: int = 1800) -> dict[str, Any]:
+        if not self.config.llm_api_key or not (model or self.config.llm_model):
             raise AgentUnavailable("LLM model/key not configured; generation held for review")
         model = model or self.config.llm_model
         url = self.config.llm_api_base.rstrip("/") + "/chat/completions"
@@ -128,6 +153,8 @@ class LLMClient:
 
     @staticmethod
     def _parse_json(text: str) -> dict[str, Any]:
+        if not isinstance(text, str):
+            raise AgentUnavailable("LLM response did not include text")
         text = text.strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.S)

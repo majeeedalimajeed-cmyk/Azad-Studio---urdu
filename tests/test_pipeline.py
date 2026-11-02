@@ -1259,3 +1259,36 @@ def test_llm_daily_quota_holds_without_long_retry(tmp_path,monkeypatch):
     with pytest.raises(module.AgentUnavailable,match='daily quota'):
         module.LLMClient(cfg).chat_json(system='JSON only',user={})
     assert len(calls)==1
+
+
+def test_model_backup_is_used_only_on_primary_failure(tmp_path,monkeypatch):
+    from nr_news import llm as module
+    cfg=temp_config(tmp_path,llm_api_key='first-key',llm_model='first-model',
+        llm_api_base='https://primary.example/v1',llm_max_retries=0,
+        llm_backup_api_key='second-key',llm_backup_api_base='https://backup.example/v1',
+        llm_backup_model='backup-model')
+    seen=[]
+    class Response:
+        def __init__(self,status,payload,text=''):self.status_code=status;self._payload=payload;self.text=text
+        def json(self):return self._payload
+    def post(url,headers=None,json=None,timeout=None):
+        seen.append((url,json['model']))
+        if 'primary.example' in url:return Response(503,{},'temporarily unavailable')
+        return Response(200,{'choices':[{'message':{'content':'{"ok":true}'}}]})
+    monkeypatch.setattr(module.requests,'post',post)
+    assert module.LLMClient(cfg).chat_json(system='JSON',user={})=={'ok':True}
+    assert seen==[('https://primary.example/v1/chat/completions','first-model'),
+                  ('https://backup.example/v1/chat/completions','backup-model')]
+    assert 'second-key' in cfg.secret_values
+
+
+def test_both_model_failures_fail_closed(tmp_path,monkeypatch):
+    from nr_news import llm as module
+    cfg=temp_config(tmp_path,llm_api_key='first-key',llm_model='first-model',llm_max_retries=0,
+        llm_backup_api_key='second-key',llm_backup_model='backup-model')
+    class Response:
+        status_code=429
+        text='tokens per day quota reached'
+    monkeypatch.setattr(module.requests,'post',lambda *a,**k:Response())
+    with pytest.raises(module.AgentUnavailable,match='Both editorial model providers'):
+        module.LLMClient(cfg).chat_json(system='JSON',user={})
