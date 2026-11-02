@@ -308,7 +308,7 @@ class NewsPipeline:
         return " ".join(chunks)
 
     def _read_original_article(self, candidate: dict[str, Any]) -> str:
-        """Read public same-page structured article text, or article/main HTML.
+        """Read public same-page structured article text.
 
         Never bypass a paywall, robots policy, or a redirect to another host.
         Publisher-supplied JSON-LD is useful where visible pages are rendered by

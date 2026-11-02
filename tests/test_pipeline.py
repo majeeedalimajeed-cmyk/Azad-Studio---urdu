@@ -1227,3 +1227,20 @@ def test_previously_queued_indian_express_story_cannot_publish(tmp_path):
     assert out['reason']=='source_not_in_operator_list'
     durable.reserve.assert_not_called()
     graph.publish_photo.assert_not_called()
+
+
+def test_llm_recovers_json_validation_error_without_weakening_parse(tmp_path,monkeypatch):
+    from nr_news import llm as module
+    cfg=temp_config(tmp_path,llm_api_key='test-key',llm_model='example-model')
+    calls=[]
+    class Response:
+        def __init__(self,status,text,payload):self.status_code=status;self.text=text;self._payload=payload
+        def json(self):return self._payload
+    def post(url,headers=None,json=None,timeout=None):
+        calls.append(json)
+        if len(calls)==1:return Response(400,'{"code":"json_validate_failed"}',{})
+        return Response(200,'',{'choices':[{'message':{'content':'{"supported":true}'}}]})
+    monkeypatch.setattr(module.requests,'post',post)
+    assert module.LLMClient(cfg).chat_json(system='JSON only',user={})=={'supported':True}
+    assert 'response_format' not in calls[1]
+    with pytest.raises(module.AgentUnavailable):module.LLMClient._parse_json('{not valid json}')

@@ -21,7 +21,7 @@ if VENDOR.exists() and str(VENDOR) not in sys.path:
     sys.path.insert(0, str(VENDOR))
 
 EXCLUSION_PATTERNS = re.compile(
-    r"\bprotests?\b|\brall(?:y|ies)\b|impeachment|vote[ -]?(?:theft|chori)|"
+    r"\bprotest\w*\b|\brall(?:y|ies)\b|impeachment|vote[ -]?(?:theft|chori)|"
     r"special intensive revision|\bsir\b|\bresign\w*.*demand|\bdemand\w*.*resign|"
     r"مواخذ|ووٹ چوری|graphic|dead body|لاش|violent riot|پرتشدد فساد|rumou?r|افواہ|unverified|غیر مصدقہ",
     re.I,

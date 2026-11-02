@@ -94,7 +94,8 @@ class LLMClient:
                 raise AgentUnavailable(redact(f"LLM request failed: {type(exc).__name__}", self.config.secret_values)) from exc
             if response.status_code >= 400:
                 body_text = getattr(response, "text", "") or ""
-                if use_json_mode and response.status_code == 400 and "response_format" in body_text:
+                if use_json_mode and response.status_code == 400 and (
+                    "response_format" in body_text or "json_validate_failed" in body_text):
                     # Some OpenAI-compatible gateways (e.g. Groq-hosted models)
                     # reject JSON mode. Retry without it; _parse_json still
                     # enforces a JSON object in the reply. This does not
@@ -126,7 +127,10 @@ class LLMClient:
             start, end = text.find("{"), text.rfind("}")
             if start < 0 or end <= start:
                 raise AgentUnavailable("LLM did not return JSON")
-            value = json.loads(text[start:end + 1])
+            try:
+                value = json.loads(text[start:end + 1])
+            except json.JSONDecodeError as exc:
+                raise AgentUnavailable("LLM returned invalid JSON") from exc
         if not isinstance(value, dict):
             raise AgentUnavailable("LLM JSON root is not an object")
         return value
