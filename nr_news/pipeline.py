@@ -390,8 +390,8 @@ class NewsPipeline:
                 model=getattr(self.config, "validator_model", None) or self.config.llm_model,
                 max_tokens=900,
             )
-        except AgentUnavailable:
-            return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_unavailable"}
+        except AgentUnavailable as exc:
+            return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_unavailable", "error": str(exc)}
         if fact_review.get("supported") is not True:
             return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_not_approved"}
         notes.append("Independent article-grounded fact review passed: " + json_dumps(fact_review))
