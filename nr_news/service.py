@@ -124,7 +124,7 @@ def dashboard_html(status: dict[str, Any]) -> str:
         color = "#38b76b" if ok else "#e2b84a"
         return f'<span class="badge" style="border-color:{color};color:{color}">{esc(label)}</span>'
 
-    configured_sources = ["munsif_daily", "etemaad_daily", "indian_express", "the_wire"]
+    configured_sources = ["the_hindu", "india_today", "the_wire"]
     source_map = {s["source"]: s for s in status["sources"]}
     source_rows = []
     for name in configured_sources:

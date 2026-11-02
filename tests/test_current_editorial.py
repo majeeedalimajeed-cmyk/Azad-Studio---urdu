@@ -141,3 +141,23 @@ def test_india_today_source_is_allowed(tmp_path):
     out=desk.process_job('verify_story',{'candidate_id':cid})
     assert out['status']=='held' and out['reasons']==['verification held']
     desk.verification.verify.assert_called_once()
+
+
+def test_only_three_requested_publisher_domains_are_allowed():
+    from nr_news.source_policy import source_allowed
+    assert source_allowed({'source':'the_hindu','url':'https://www.thehindu.com/news/x'})
+    assert source_allowed({'source':'india_today','url':'https://www.indiatoday.in/news/x'})
+    assert source_allowed({'source':'the_wire','url':'https://thewire.in/news/x'})
+    assert not source_allowed({'source':'indian_express','url':'https://indianexpress.com/article/x'})
+    assert not source_allowed({'source':'the_hindu','url':'https://thehindu.com.evil.example/news/x'})
+
+
+def test_monitor_calls_only_three_operator_sources(tmp_path):
+    from nr_news.sources import SourceMonitor
+    from nr_news.models import SourceResult
+    conf=cfg(tmp_path);db=Database(conf.db_path);monitor=SourceMonitor(db,config=conf)
+    for method,name in [('_hindu','the_hindu'),('_india_today','india_today'),('_the_wire','the_wire')]:
+        setattr(monitor,method,Mock(return_value=SourceResult(name,True,0,'ok')))
+    monitor._indian_express=Mock()
+    assert [x.source for x in monitor.monitor_all()]==['the_hindu','india_today','the_wire']
+    monitor._indian_express.assert_not_called()

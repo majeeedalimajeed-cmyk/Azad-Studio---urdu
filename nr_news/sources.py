@@ -127,7 +127,6 @@ class SourceMonitor:
         results = [
             self._hindu(limit),
             self._india_today(limit),
-            self._indian_express(limit),
             self._the_wire(limit),
         ]
         for result in results:

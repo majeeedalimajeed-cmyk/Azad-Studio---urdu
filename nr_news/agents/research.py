@@ -74,7 +74,7 @@ class ResearchAgent:
         self.config = config
 
     # Sources the desk wants first for Hyderabad/Telangana, India and world.
-    PREFERRED_PUBLISHERS = ("The Hindu", "India Today", "The Indian Express", "The Wire")
+    PREFERRED_PUBLISHERS = ("The Hindu", "India Today", "The Wire")
 
     @staticmethod
     def priority(candidate: Candidate) -> int:

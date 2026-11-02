@@ -21,6 +21,7 @@ from .db import Database
 from .llm import AgentUnavailable
 from .models import Candidate, EditorialContent, SourceResult, VerificationResult
 from .sources import SourceMonitor
+from .source_policy import source_allowed
 from .util import (canonical_url, clean_text, iso, is_official_url, json_dumps,
                    numeric_atoms, redact, sha256_text)
 
@@ -134,8 +135,7 @@ class NewsPipeline:
         make this safe against duplicates."""
         results: list[dict[str, Any]] = []
         # Rank by editorial priority (Hyderabad/Telangana, then politics,
-        # then India/world, preferring The Hindu / Indian Express /
-        # India Today) and freshness — never oldest-backlog-first.
+        # then India/world, using the approved sources) and freshness — never oldest-backlog-first.
         approved = self.db.query("SELECT * FROM editorials WHERE status='approved'", ())
 
         def _rank(editorial: dict[str, Any]) -> tuple[int, str]:
@@ -164,6 +164,8 @@ class NewsPipeline:
             if not self.config.dry_run and self.db.get_setting(f"english_roman_verified:{editorial['id']}") != "true":
                 continue
             source = self.db.get_candidate(editorial["candidate_id"]) or {}
+            if not self.config.dry_run and not source_allowed(source):
+                continue
             try:
                 probe = Candidate(source=source.get("source", ""), publisher=source.get("publisher", ""),
                     url=source.get("url", ""), original_headline=source.get("original_headline", ""),
@@ -256,10 +258,7 @@ class NewsPipeline:
         candidate_id = payload["candidate_id"]
         extra_urls = payload.get("evidence_urls", [])
         candidate = self.db.get_candidate(candidate_id) or {}
-        allowed = {"the_hindu": "thehindu.com", "india_today": "indiatoday.in", "indian_express": "indianexpress.com", "the_wire": "thewire.in"}
-        domain = (urlparse(candidate.get("url", "")).hostname or "").lower()
-        suffix = allowed.get(candidate.get("source"))
-        if not suffix or not (domain == suffix or domain.endswith("." + suffix)):
+        if not source_allowed(candidate):
             return {"status": "held", "reason": "source_not_in_operator_list"}
         text = " ".join((candidate.get("original_headline", ""), candidate.get("body_excerpt", ""))).lower()
         # The two one-off posts predate this scheduler's database records.

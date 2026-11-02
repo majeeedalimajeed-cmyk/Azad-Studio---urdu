@@ -420,7 +420,7 @@ def test_graph_api_error_is_recorded_without_false_success(tmp_path):
     db.set_setting("facebook_identity_verified_at", iso())
     db.set_setting("facebook_page_id", "123456789")
     db.set_setting("facebook_test_post_passed", "true")
-    candidate = sample_candidate(url="https://example.org/error-story")
+    candidate = sample_candidate(source="the_hindu", publisher="The Hindu", url="https://www.thehindu.com/news/error-story")
     cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
     content = {
         "urdu_headline": "سرخی", "urdu_bullets": ["ایک", "دو", "تین"],
@@ -461,7 +461,7 @@ def test_successful_publish_cross_posts_to_instagram(tmp_path):
     db.set_setting("facebook_identity_verified_at", iso())
     db.set_setting("facebook_page_id", "123456789")
     db.set_setting("facebook_test_post_passed", "true")
-    candidate = sample_candidate(url="https://example.org/ig-story")
+    candidate = sample_candidate(source="the_hindu", publisher="The Hindu", url="https://www.thehindu.com/news/ig-story")
     cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
     content = {
         "urdu_headline": "سرخی", "urdu_bullets": ["ایک", "دو", "تین"],
@@ -1133,7 +1133,7 @@ def test_publish_gate_satisfied_by_standing_operator_approval(tmp_path):
     db.set_setting("facebook_identity_verified_at", iso())
     db.set_setting("facebook_page_id", "123456789")
     assert db.get_setting("facebook_test_post_passed") is None
-    candidate = sample_candidate(url="https://example.org/gate-story")
+    candidate = sample_candidate(source="the_hindu", publisher="The Hindu", url="https://www.thehindu.com/news/gate-story")
     cid, _ = db.insert_candidate(pipeline.research._to_row(candidate, "test"))
     content = {
         "urdu_headline": "سرخی", "urdu_bullets": ["ایک", "دو", "تین"],
@@ -1173,7 +1173,7 @@ def _publisher_for_ledger_test(tmp_path, durable_ledger, graph):
     db=Database(cfg.db_path);desk=NewsPipeline(cfg,db)
     db.set_setting('facebook_identity_verified_at',iso());db.set_setting('facebook_page_id','123')
     db.set_setting('facebook_test_post_passed','true')
-    candidate=sample_candidate(url='https://www.indiatoday.in/story/same-story')
+    candidate=sample_candidate(source='india_today',publisher='India Today',url='https://www.indiatoday.in/story/same-story')
     cid,_=db.insert_candidate(desk.research._to_row(candidate,'test'))
     content={'urdu_headline':'English headline','urdu_bullets':['One','Two','Three'],
         'roman_headline':'Roman headline','roman_bullets':['Ek','Do','Teen'],
@@ -1214,3 +1214,16 @@ def test_ambiguous_upload_never_retried_even_after_database_loss(tmp_path):
     out=restarted.publish(eid2,card2,dry_run=False)
     assert out['reason']=='durable_duplicate_or_previous_attempt'
     restarted_graph.publish_photo.assert_not_called()
+
+
+def test_previously_queued_indian_express_story_cannot_publish(tmp_path):
+    from unittest.mock import Mock
+    graph=Mock();graph.confirmed_page_id.return_value='123';durable=Mock()
+    publisher,eid,card=_publisher_for_ledger_test(tmp_path,durable,graph)
+    ed=publisher.db.get_editorial(eid)
+    publisher.db.execute('UPDATE candidates SET source=?,url=? WHERE id=?',
+        ('indian_express','https://indianexpress.com/article/example',ed['candidate_id']))
+    out=publisher.publish(eid,card,dry_run=False)
+    assert out['reason']=='source_not_in_operator_list'
+    durable.reserve.assert_not_called()
+    graph.publish_photo.assert_not_called()

@@ -9,6 +9,7 @@ from ..config import CONFIG
 from ..db import Database
 from ..facebook import FacebookGraphClient, GraphAPIError
 from ..publication_ledger import GitHubPublicationLedger, LedgerDuplicate, LedgerUnavailable
+from ..source_policy import source_allowed
 from ..util import iso, json_dumps, redact, sha256_file, sha256_text
 
 
@@ -154,6 +155,8 @@ class PublishingAgent:
         # The remote compare-and-swap reservation MUST commit before any
         # Graph upload. SQLite and Actions cache are not crash-durable enough.
         candidate = self.db.get_candidate(editorial.get("candidate_id")) or {}
+        if not source_allowed(candidate):
+            return {"status": "held", "reason": "source_not_in_operator_list"}
         try:
             self.ledger.reserve(key=idempotency_key, candidate=candidate,
                                 editorial_id=editorial_id, page_id=page_id, caption_marker=marker)
