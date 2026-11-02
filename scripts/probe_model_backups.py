@@ -15,7 +15,7 @@ def probe(label,key,base,model):
         except Exception:return label,'HTTP '+str(r.status_code)
     except Exception as exc:return label,'error '+type(exc).__name__
 items=[('OpenAI',os.getenv('OPENAI_TEST_KEY'), 'https://api.openai.com/v1','gpt-4o-mini'),
-       ('Gemini',os.getenv('GEMINI_TEST_KEY'),'https://generativelanguage.googleapis.com/v1beta/openai','gemini-2.5-flash')]
+       ('Gemini',os.getenv('GEMINI_TEST_KEY'),'https://generativelanguage.googleapis.com/v1beta/openai','gemini-3.5-flash')]
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
  for label,result in pool.map(lambda x:probe(*x),items):print('BACKUP MODEL',label,result,flush=True)
 

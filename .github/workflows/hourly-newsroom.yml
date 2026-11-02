@@ -68,6 +68,24 @@ jobs:
           GEMINI_TEST_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/probe_model_backups.py
 
+      - name: Test real article with backup model (testing branch only)
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+        env:
+          NR_LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NR_LLM_API_BASE: https://generativelanguage.googleapis.com/v1beta/openai
+          NR_LLM_MODEL: gemini-3.5-flash
+          NR_ROMAN_URDU_MODEL: gemini-3.5-flash
+          NR_VALIDATOR_MODEL: gemini-3.5-flash
+        run: PYTHONPATH=. python scripts/diagnose_sources.py
+
+      - name: Upload backup test preview (testing branch only)
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-diagnostic-preview
+          path: diagnostic-results/
+          if-no-files-found: ignore
+
       - name: Verify durable publishing ledger
         if: github.event_name == 'workflow_dispatch'
         run: python -m nr_news.publication_ledger
