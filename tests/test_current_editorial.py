@@ -273,3 +273,24 @@ def test_date_components_from_iso_inventory_do_not_cause_false_hold():
     data['urdu_bullets'][0]='Rescue happened on Nov 9.'
     ResearchAgent._validate_output(data)
     assert data['requires_human_review'] is True
+
+
+def test_mixed_new_and_completed_projects_require_clear_foundation_status(tmp_path):
+    conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
+    c=Candidate(source='india_today',publisher='India Today',url='https://www.indiatoday.in/news/project',
+        original_headline='Minister opens and launches new projects',published_at=iso(),updated_at=None,
+        language='en',body_excerpt='Minister opens and launches new projects.'*4,category='politics')
+    cid,_=db.insert_candidate(p.research._to_row(c,'hourly'))
+    article='Minister opens and launches new projects. The minister inaugurated completed works and laid foundation stones for new projects. '*9
+    p._read_original_article=Mock(return_value=article)
+    p.research.summarize_urdu=Mock(return_value={'urdu_headline':'Minister launches new projects',
+        'urdu_bullets':['Minister opened completed works.','The minister launched new projects.','The projects concern local facilities.'],
+        'facts':{},'verification_notes':[],'requires_human_review':False})
+    p.translator.translate=Mock(return_value={'roman_headline':'Naye projects ka iqtataah',
+        'roman_bullets':['Mukammal kaam khole.','Naye projects ka iqtataah kiya.','Yeh local facilities hain.']})
+    p.validator.validate=Mock(return_value={'ok':True,'errors':[],'warnings':[],'model_review':{'consistent':True}})
+    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'current_news':True,'straight_news':True,'issues':[]})
+    p.cards.render=Mock()
+    out=p.generate_from_verified(cid,VerificationResult(True,[],[],'high'))
+    assert out['reason']=='project_status_ambiguous'
+    p.cards.render.assert_not_called()

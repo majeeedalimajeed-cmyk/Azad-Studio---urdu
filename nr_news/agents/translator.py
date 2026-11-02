@@ -14,6 +14,7 @@ Translate into natural Roman Urdu without adding opinions, explanations, entitie
 Rules:
 - Preserve every name, location, title, date, number and unit accurately.
 - Preserve uncertainty exactly: alleged, proposed, attributed, developing, and phrases such as 'wherever feasible'.
+- Preserve the distinction between inaugurated/opened completed projects and laying foundation stones for future projects; never say both were inaugurated.
 - The Roman Urdu bullet count MUST equal the English bullet count. Keep each bullet below 125 characters including spaces so all text fits on one card.
 - Keep spelling of names/locations consistent and use common Latin spellings for acronyms.
 - Do not use publisher names and do not invent a quotation.

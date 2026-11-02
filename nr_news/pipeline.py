@@ -436,6 +436,7 @@ class NewsPipeline:
             fact_review = self.research.llm.chat_json(
                 system=("Independently check every English and Roman Urdu claim against the original article. "
                         "Require exact support for names, dates, figures and attribution; proposals remain proposals. "
+                        "Do not confuse completed projects opened with future projects whose foundations were laid, in either language. "
                         "Reject unsupported claims, uncertainty, mismatches, and prohibited protest coverage. "
                         "Check factual event dates and tense: never treat a retrospective about an old event as a new event. "
                         "Judge whether this is straight news, not opinion, retrospective analysis, commentary or promotion. "
@@ -472,6 +473,16 @@ class NewsPipeline:
             publication_time=iso(),
             media=media_list or None,
         )
+        english_copy = content.urdu_headline + " " + " ".join(content.urdu_bullets)
+        roman_copy = content.roman_headline + " " + " ".join(content.roman_bullets)
+        if (re.search(r"foundation stones?|laid (?:the )?foundation", article, re.I)
+            and re.search(r"\bnew (?:projects?|works?|facilities|buildings?)\b", english_copy, re.I)):
+            if not re.search(r"\bfoundation", english_copy, re.I) or not re.search(
+                    r"foundation|buni?y?a?d", roman_copy, re.I):
+                self.db.add_review(candidate_id, verification.cluster_id, "project_status_ambiguous", {
+                    "reason": "New foundations and completed inaugurations must be distinguished in both languages.",
+                })
+                return {"status": "held", "candidate_id": candidate_id, "reason": "project_status_ambiguous"}
         if editorial_exclusion_text(
             content.urdu_headline, " ".join(content.urdu_bullets),
             content.roman_headline, " ".join(content.roman_bullets),
