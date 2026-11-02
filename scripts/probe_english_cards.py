@@ -34,7 +34,7 @@ with TemporaryDirectory() as tmp:
     desk.research.llm.chat_json=debug_call
     verification=VerificationResult(True,[],['Synthetic test source supplied for local probe.'],'high')
     result=desk.generate_from_verified(cid,verification)
-    print('SYNTHETIC TEST RESULT:',result.get('status'),result.get('reason'))
+    print('SYNTHETIC TEST RESULT:',result.get('status'),result.get('reason'),result.get('errors'))
     if result.get('status') != 'rendered' or not result.get('cards'):
         raise SystemExit('Smoke test did not generate a fully reviewed card')
     print('Synthetic card generated and independently checked; nothing posted.')
