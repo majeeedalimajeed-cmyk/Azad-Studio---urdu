@@ -15,11 +15,16 @@ p=get(page,{'fields':'name,instagram_business_account{id,username}'})
 if p is not None:
  acc=p.get('instagram_business_account') or {}; print('LINKED_ACCOUNT',bool(acc.get('id')),'USERNAME',acc.get('username','not returned'))
  if acc.get('id'):
-  a=get(str(acc['id']),{'fields':'username,account_type,media_count'}); print('ACCOUNT_READ_OK',bool(a),'ACCOUNT_TYPE',(a or {}).get('account_type','not returned'))
+  a=get(str(acc['id']),{'fields':'username,media_count'}); print('ACCOUNT_READ_OK',bool(a),'ACCOUNT_TYPE',(a or {}).get('account_type','not returned'))
 permissions=get('me/permissions')
 if permissions is not None:
  available={x.get('permission'):x.get('status') for x in permissions.get('data',[])}
  print('IG_PERMISSIONS', {x:available.get(x,'not listed') for x in ['instagram_basic','instagram_content_publish','pages_read_engagement']})
+accounts=get('me/accounts',{'fields':'id,access_token','limit':100})
+if accounts:
+ for entry in accounts.get('data',[]):
+  if str(entry.get('id')) == page and entry.get('access_token'):
+   h={'Authorization':'Bearer '+entry['access_token']}; print('DERIVED_PAGE_TOKEN',True);break
 postid=page+'_122101386051530990'
 attachments=get(postid+'/attachments')
 if attachments is not None:
