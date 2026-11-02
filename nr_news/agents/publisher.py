@@ -68,6 +68,8 @@ class PublishingAgent:
             return {"status": "held", "reason": "editorial_not_approved"}
         if card_row.get("visual_status") != "passed":
             return {"status": "held", "reason": "card_visual_inspection_failed"}
+        if not dry_run and int(card_row.get("page_count") or 1) != 1:
+            return {"status": "held", "reason": "single_card_required"}
 
         # Existing queued cards may have the old Urdu/byline or stock photos.
         # Live publication requires a new verified English/Roman editorial and

@@ -14,7 +14,7 @@ Translate into natural Roman Urdu without adding opinions, explanations, entitie
 Rules:
 - Preserve every name, location, title, date, number and unit accurately.
 - Preserve uncertainty exactly: alleged, proposed, attributed, developing, and phrases such as 'wherever feasible'.
-- The Roman Urdu bullet count MUST equal the English bullet count.
+- The Roman Urdu bullet count MUST equal the English bullet count. Keep each bullet below 125 characters including spaces so all text fits on one card.
 - Keep spelling of names/locations consistent and use common Latin spellings for acronyms.
 - Do not use publisher names and do not invent a quotation.
 - In entity_map and uncertainty_map, each urdu field must be an exact verbatim substring of the approved English headline or bullets, NOT an expansion from the fact inventory. Each roman field must be an exact verbatim substring of the Roman headline or bullets. Use an empty array if no exact mapping is available.

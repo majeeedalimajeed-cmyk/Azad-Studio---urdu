@@ -260,6 +260,9 @@ class NewsPipeline:
         candidate = self.db.get_candidate(candidate_id) or {}
         if not source_allowed(candidate):
             return {"status": "held", "reason": "source_not_in_operator_list"}
+        if "/video/" in urlparse(candidate.get("url", "")).path.lower():
+            self.db.update_candidate(candidate_id, status="excluded", review_reason="video_page_not_a_news_article")
+            return {"status": "held", "reason": "video_page_not_a_news_article"}
         text = " ".join((candidate.get("original_headline", ""), candidate.get("body_excerpt", ""))).lower()
         # The two one-off posts predate this scheduler's database records.
         if ("aicte" in text and ("modrobs" in text or "four schemes" in text or "four major schemes" in text)) or ("treated" in text and "water" in text and ("revanth" in text or "green tanker" in text)):
@@ -355,18 +358,9 @@ class NewsPipeline:
             body = item.get("articleBody")
             if isinstance(headline, str) and isinstance(body, str) and len(clean_text(body, 12000)) >= 600:
                 return clean_text(headline + " " + body, 12000)
-        container = soup.find("article") or soup.find("main")
-        if not container:
-            return ""
-        for unwanted in container.select("nav, aside, footer, script, style, form, [class*='related'], [class*='recommend']"):
-            unwanted.decompose()
-        heading = container.find("h1") or soup.find("h1")
-        parts = [heading.get_text(" ", strip=True)] if heading else []
-        for paragraph in container.find_all("p"):
-            text = clean_text(paragraph.get_text(" ", strip=True), 3000)
-            if len(text) >= 45:
-                parts.append(text)
-        return clean_text(" ".join(parts), 12000)
+        # Never fall back to the first generic <article>/<main>: on some
+        # pages it belongs to a related story, not the requested report.
+        return ""
 
     @staticmethod
     def _article_matches_candidate(candidate: dict[str, Any], article: str) -> bool:
@@ -496,6 +490,14 @@ class NewsPipeline:
         self.db.set_setting(f"english_roman_verified:{editorial_id}", "true")
 
         rendered = self.cards.render(editorial_id, content, media=media_list or None)
+        if len(rendered) != 1 or rendered[0].page_count != 1:
+            # A single-photo publication cannot safely carry continuation pages.
+            self.db.set_editorial_status(editorial_id, "pending_review")
+            self.db.add_review(candidate_id, verification.cluster_id, "multi_page_card_hold", {
+                "editorial_id": editorial_id, "rendered_pages": len(rendered),
+            })
+            return {"status": "held", "candidate_id": candidate_id,
+                    "editorial_id": editorial_id, "reason": "single_card_required"}
         publish_results: list[dict[str, Any]] = []
         for card in rendered:
             card_row = self.db.one("SELECT * FROM cards WHERE file_path=? ORDER BY created_at DESC LIMIT 1", (card.path,))

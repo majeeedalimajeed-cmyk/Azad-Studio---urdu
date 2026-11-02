@@ -22,11 +22,17 @@ with TemporaryDirectory() as tmp:
         print('SOURCE',r.source,'ok=',r.ok,'count=',r.item_count,flush=True)
         for c in r.candidates:
             when=parse_iso(c.published_at)
-            if when and -2 < (utcnow()-when).total_seconds()/3600 < 36 and not editorial_exclusion_text(c.original_headline,c.body_excerpt):
+            if when and '/video/' not in c.url.lower() and -2 < (utcnow()-when).total_seconds()/3600 < 36 and not editorial_exclusion_text(c.original_headline,c.body_excerpt):
                 pool.append(c)
+    # Try each source without letting one paywalled feed starve the others.
     pool.sort(key=ResearchAgent.priority,reverse=True)
+    groups={name:[c for c in pool if c.source==name] for name in ('the_hindu','india_today','the_wire')}
+    ordered=[]
+    for i in range(12):
+        for name in ('india_today','the_wire','the_hindu'):
+            if i < len(groups[name]):ordered.append(groups[name][i])
     rendered=False
-    for c in pool[:14]:
+    for c in ordered[:30]:
         cid,_=db.insert_candidate(p.research._to_row(c,'test'))
         out=p.process_job('verify_story',{'candidate_id':cid})
         print('ATTEMPT',c.source,'priority=',ResearchAgent.priority(c),'url=',c.url,
@@ -34,7 +40,7 @@ with TemporaryDirectory() as tmp:
         if out.get('status')=='rendered':
             dest=Path('diagnostic-results');dest.mkdir(exist_ok=True)
             shutil.copy(out['cards'][0],dest/'preview.png')
-            for a in cfg.audit_dir.glob('*.json'):shutil.copy(a,dest/'audit.json')
+            for a in cfg.audit_dir.glob('editorial-*.json'):shutil.copy(a,dest/'audit.json')
             print('SUCCESS: One real, source-read bilingual card rendered in an isolated temporary database; no publication.',flush=True)
             rendered=True;break
     if not rendered:

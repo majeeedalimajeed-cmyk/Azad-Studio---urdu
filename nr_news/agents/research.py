@@ -61,7 +61,7 @@ CONTROVERSIAL_PROTEST = re.compile(
     r"مواخذ|استعفیٰ|ووٹ چوری", re.I)
 
 RESEARCH_SYSTEM = """You are an English news editor. Use only the supplied original article and verified evidence.
-Write a concise original English headline and 3–5 short English bullets. The schema has legacy key names: put English in urdu_headline and urdu_bullets, NOT Urdu script.
+Write a concise original English headline and exactly three brief English bullets. Each bullet must be at most 105 characters including spaces so both languages fit on one card. The schema has legacy key names: put English in urdu_headline and urdu_bullets, NOT Urdu script.
 Preserve names, dates, figures, locations, titles, uncertainties and attribution. Never present a proposal as an approved decision. Never invent facts, sources or quotations. Do not copy wording verbatim. Flag any doubt for human review.
 Return ONLY one JSON object using exactly this shape: {"urdu_headline": "English headline", "urdu_bullets": ["English bullet 1", "English bullet 2", "English bullet 3"], "verification_notes": [], "facts": {"names": [], "dates": [], "figures": [], "locations": [], "claim_status": "confirmed"}, "requires_human_review": false}. The facts field MUST be an object, never a list.
 """
@@ -239,8 +239,10 @@ class ResearchAgent:
         if not isinstance(data.get("urdu_headline"), str) or not data["urdu_headline"].strip():
             raise AgentUnavailable("Agent A returned no Urdu headline")
         bullets = data.get("urdu_bullets")
-        if not isinstance(bullets, list) or not 3 <= len(bullets) <= 5:
-            raise AgentUnavailable("Agent A must return 3-5 Urdu bullets")
+        if not isinstance(bullets, list) or len(bullets) != 3:
+            raise AgentUnavailable("Agent A must return exactly three English bullets")
+        if any(isinstance(x, str) and len(x) > 125 for x in bullets):
+            raise AgentUnavailable("Agent A bullets exceed the single-card size limit")
         if any(not isinstance(x, str) or len(x.strip()) < 5 for x in bullets):
             raise AgentUnavailable("Agent A returned an empty Urdu bullet")
         facts = data.get("facts")

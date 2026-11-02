@@ -198,3 +198,45 @@ def test_full_article_is_read_before_verification(tmp_path):
     desk.process_job('verify_story',{'candidate_id':cid})
     assert desk.verification.verify.call_args.kwargs['original_article_text']==full
     assert db.get_candidate(cid)['body_excerpt']=='Short feed excerpt'
+
+
+def test_related_html_article_is_never_mistaken_for_original(tmp_path):
+    from types import SimpleNamespace
+    conf=cfg(tmp_path);desk=NewsPipeline(conf,Database(conf.db_path))
+    url='https://www.indiatoday.in/india/story/original'
+    related=('A completely different related article on the same subject and with similar names. '*12)
+    html='<html><h1>Original headline</h1><article><p>'+related+'</p></article></html>'
+    desk.evidence.client.get=Mock(return_value=SimpleNamespace(ok=True,url=url,text=html))
+    assert desk._read_original_article({'url':url})==''
+
+
+def test_current_video_page_is_not_used_as_news_article(tmp_path):
+    conf=cfg(tmp_path);db=Database(conf.db_path);desk=NewsPipeline(conf,db)
+    c=Candidate(source='india_today',publisher='India Today',url='https://www.indiatoday.in/india/video/123',
+        original_headline='Politician speaks at event',published_at=iso(),updated_at=None,
+        language='en',body_excerpt='A politician spoke at an event today.',category='politics')
+    cid,_=db.insert_candidate(desk.research._to_row(c,'hourly'))
+    desk._read_original_article=Mock()
+    assert desk.process_job('verify_story',{'candidate_id':cid})['reason']=='video_page_not_a_news_article'
+    desk._read_original_article.assert_not_called()
+
+
+def test_continuation_cards_are_held_as_a_whole(tmp_path):
+    conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
+    c=Candidate(source='the_hindu',publisher='The Hindu',url='https://www.thehindu.com/news/policy',
+        original_headline='Telangana cabinet approves education policy',published_at=iso(),updated_at=None,
+        language='en',body_excerpt='The Telangana cabinet approved a new education policy.'*3,category='politics')
+    cid,_=db.insert_candidate(p.research._to_row(c,'hourly'))
+    p._read_original_article=Mock(return_value='Telangana cabinet approves education policy in Hyderabad. '*20)
+    p.research.summarize_urdu=Mock(return_value={'urdu_headline':'Cabinet approves education policy',
+        'urdu_bullets':['The cabinet approved a policy.','The policy concerns education.','The cabinet met in Hyderabad.'],
+        'facts':{},'verification_notes':[],'requires_human_review':False})
+    p.translator.translate=Mock(return_value={'roman_headline':'Taleemi policy','roman_bullets':['Ek','Do','Teen']})
+    p.validator.validate=Mock(return_value={'ok':True,'errors':[],'warnings':[],'model_review':{'consistent':True}})
+    p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'issues':[]})
+    p.cards.render=Mock(return_value=[SimpleNamespace(page_count=2),SimpleNamespace(page_count=2)])
+    p.publisher.publish=Mock()
+    out=p.generate_from_verified(cid,VerificationResult(True,[],[],'high'))
+    assert out['reason']=='single_card_required'
+    assert db.get_editorial(out['editorial_id'])['status']=='pending_review'
+    p.publisher.publish.assert_not_called()
