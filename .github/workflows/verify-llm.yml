@@ -9,9 +9,9 @@ jobs:
       NR_SKIP_DOTENV: "1"
       NR_LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       NR_LLM_API_BASE: https://generativelanguage.googleapis.com/v1beta/openai
-      NR_LLM_MODEL: gemini-3.5-flash-lite
-      NR_ROMAN_URDU_MODEL: gemini-3.5-flash-lite
-      NR_VALIDATOR_MODEL: gemini-3.5-flash-lite
+      NR_LLM_MODEL: gemini-3-flash-preview
+      NR_ROMAN_URDU_MODEL: gemini-3-flash-preview
+      NR_VALIDATOR_MODEL: gemini-3-flash-preview
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
