@@ -6,23 +6,14 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      NR_SKIP_DOTENV: "1"
-      NR_LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      NR_LLM_API_BASE: https://generativelanguage.googleapis.com/v1beta/openai
-      NR_LLM_MODEL: gemini-3-flash-preview
-      NR_ROMAN_URDU_MODEL: gemini-3-flash-preview
-      NR_VALIDATOR_MODEL: gemini-3-flash-preview
+      NR_FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+      NR_FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+      NR_GRAPH_API_VERSION: ${{ vars.NR_GRAPH_API_VERSION || 'v26.0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-      - run: pip install -r requirements.txt
-      - name: Test real article on spare model without publishing
-        run: PYTHONPATH=. python scripts/test_lite_model.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: editorial-model-preview
-          path: diagnostic-results/
-          if-no-files-found: ignore
+      - run: pip install requests
+      - name: Read-only Instagram connection check
+        run: python scripts/check_instagram_link.py
