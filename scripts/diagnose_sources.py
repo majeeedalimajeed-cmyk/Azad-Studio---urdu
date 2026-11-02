@@ -8,6 +8,21 @@ from nr_news.db import Database
 from nr_news.pipeline import NewsPipeline
 from nr_news.models import Candidate
 
+# Log only model response metadata, never credentials or full response text.
+import requests
+original_post=requests.post
+def inspected_post(url, *args, **kwargs):
+    response=original_post(url,*args,**kwargs)
+    if 'generativelanguage.googleapis.com' in url and response.status_code == 200:
+        try:
+            data=response.json();choice=data['choices'][0]
+            print('MODEL RESPONSE', 'finish=',choice.get('finish_reason'),
+                  'content_chars=',len(choice.get('message',{}).get('content') or ''),
+                  'usage=',data.get('usage'),flush=True)
+        except Exception:pass
+    return response
+requests.post=inspected_post
+
 with TemporaryDirectory() as tmp:
     root=Path(tmp)
     cfg=replace(CONFIG,db_path=root/'db.sqlite3',data_dir=root,card_dir=root/'cards',audit_dir=root/'audit',

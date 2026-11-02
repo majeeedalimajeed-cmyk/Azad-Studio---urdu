@@ -81,6 +81,11 @@ class LLMClient:
                     {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
                 ],
             }
+            if "generativelanguage.googleapis.com" in self.config.llm_api_base:
+                # Thinking tokens count toward the same output budget; leave
+                # enough room for a complete structured editorial review.
+                payload["max_tokens"] = max(max_tokens, 4096)
+                payload["reasoning_effort"] = "low"
             if use_json_mode:
                 payload["response_format"] = {"type": "json_object"}
             try:
