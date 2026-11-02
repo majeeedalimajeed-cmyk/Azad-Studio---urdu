@@ -79,7 +79,15 @@ class LLMClient:
                 return LLMClient(backup_config)._chat_json_primary(
                     system=system, user=user, model=backup_model, max_tokens=max_tokens)
             except AgentUnavailable as exc:
-                raise AgentUnavailable("Both editorial model providers are unavailable; story held") from exc
+                def classify(error: str | None) -> str:
+                    value = str(error or "unconfigured")
+                    if "daily quota" in value.lower():
+                        return "daily quota exhausted"
+                    match = re.search(r"LLM HTTP (\d{3})", value)
+                    return "HTTP " + match.group(1) if match else "unavailable"
+                raise AgentUnavailable(
+                    "Both editorial model providers are unavailable; story held "
+                    f"(primary: {classify(primary_error)}, backup: {classify(str(exc))})") from exc
         raise AgentUnavailable(primary_error or "LLM model/key not configured; generation held for review")
 
     def _chat_json_primary(self, *, system: str, user: dict[str, Any], model: str | None = None,
