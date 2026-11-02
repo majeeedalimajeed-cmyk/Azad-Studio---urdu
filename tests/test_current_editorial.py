@@ -294,3 +294,11 @@ def test_mixed_new_and_completed_projects_require_clear_foundation_status(tmp_pa
     out=p.generate_from_verified(cid,VerificationResult(True,[],[],'high'))
     assert out['reason']=='project_status_ambiguous'
     p.cards.render.assert_not_called()
+
+
+def test_legacy_manual_story_dedup_checks_full_articles():
+    from nr_news.pipeline import _already_posted_manually
+    assert _already_posted_manually('AICTE announces four new schemes for institutes')
+    assert _already_posted_manually('AICTE launches MODROBS with IDEA Lab and Margdarshan')
+    assert _already_posted_manually('Revanth Reddy says treated wastewater should be used')
+    assert not _already_posted_manually('Telangana ministers discuss a new school policy')

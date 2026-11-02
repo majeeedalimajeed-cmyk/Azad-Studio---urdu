@@ -26,6 +26,17 @@ from .util import (canonical_url, clean_text, iso, is_official_url, json_dumps,
                    numeric_atoms, redact, sha256_text)
 
 
+def _already_posted_manually(text: str) -> bool:
+    """Conservatively prevent repeats of the two pre-ledger manual posts."""
+    text = (text or "").lower()
+    aicte = "aicte" in text and (
+        bool(re.search(r"four\s+(?:new\s+|major\s+)?schemes", text)) or
+        ("modrobs" in text and ("idea lab" in text or "margdarshan" in text)))
+    water = "treated" in text and ("water" in text or "wastewater" in text) and (
+        "revanth" in text or "green tanker" in text)
+    return bool(aicte or water)
+
+
 class NewsPipeline:
     def __init__(self, config=CONFIG, db: Database | None = None):
         self.config = config
@@ -268,7 +279,7 @@ class NewsPipeline:
             return {"status": "held", "reason": "video_page_not_a_news_article"}
         text = " ".join((candidate.get("original_headline", ""), candidate.get("body_excerpt", ""))).lower()
         # The two one-off posts predate this scheduler's database records.
-        if ("aicte" in text and ("modrobs" in text or "four schemes" in text or "four major schemes" in text)) or ("treated" in text and "water" in text and ("revanth" in text or "green tanker" in text)):
+        if _already_posted_manually(text):
             return {"status": "held", "reason": "story_already_posted_manually"}
         probe = Candidate(source=candidate.get("source", ""), publisher=candidate.get("publisher", ""),
                           url=candidate.get("url", ""), original_headline=candidate.get("original_headline", ""),
@@ -282,6 +293,9 @@ class NewsPipeline:
             self.db.update_candidate(candidate_id, status="held", review_reason="original_article_unreadable_or_mismatched")
             return {"status": "held", "candidate_id": candidate_id,
                     "reason": "original_article_unreadable_or_mismatched"}
+        if _already_posted_manually(article):
+            self.db.update_candidate(candidate_id, status="excluded", review_reason="story_already_posted_manually")
+            return {"status": "held", "candidate_id": candidate_id, "reason": "story_already_posted_manually"}
         if editorial_exclusion_text(candidate.get("original_headline", ""), article):
             self.db.update_candidate(candidate_id, status="excluded", review_reason="article_matches_editorial_exclusion")
             return {"status": "held", "candidate_id": candidate_id,
