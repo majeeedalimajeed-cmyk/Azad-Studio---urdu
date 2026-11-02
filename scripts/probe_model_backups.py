@@ -29,3 +29,17 @@ if key:
   else:
    print('GEMINI MODEL LIST HTTP',response.status_code,flush=True)
  except Exception as exc:print('GEMINI MODEL LIST',type(exc).__name__,flush=True)
+if key:
+ for model in ('gemini-2.5-flash','gemini-3.5-flash','gemini-flash-latest'):
+  try:
+   resp=requests.post('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent',
+      headers={'x-goog-api-key':key,'content-type':'application/json'},
+      json={'contents':[{'role':'user','parts':[{'text':'Return JSON: {"ok": true}'}]}],
+       'generationConfig':{'responseMimeType':'application/json','maxOutputTokens':100}},timeout=30)
+   result='OK' if resp.ok else ('HTTP '+str(resp.status_code))
+   if not resp.ok:
+    try:
+     e=resp.json().get('error',{});result+=' code='+str(e.get('status',''))+' message='+str(e.get('message',''))[:250].replace(key,'[redacted]')
+    except Exception:pass
+   print('GEMINI NATIVE',model,result,flush=True)
+  except Exception as e:print('GEMINI NATIVE',model,type(e).__name__,flush=True)
