@@ -69,6 +69,14 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
         run: PYTHONPATH=. python scripts/diagnose_sources.py
 
+      - name: Upload diagnostic preview (testing branch only)
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+        uses: actions/upload-artifact@v4
+        with:
+          name: editorial-diagnostic-preview
+          path: diagnostic-results/
+          if-no-files-found: ignore
+
       - name: Restore durable SQLite database
         uses: actions/cache@v4
         with:

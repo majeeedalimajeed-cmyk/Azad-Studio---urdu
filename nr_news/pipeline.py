@@ -271,14 +271,23 @@ class NewsPipeline:
                           category=candidate.get("category", ""))
         if editorial_exclusion_text(probe.original_headline, probe.body_excerpt):
             return {"status": "held", "reason": "editorial_exclusion"}
+        article = self._read_original_article(candidate)
+        if not self._article_matches_candidate(candidate, article):
+            self.db.update_candidate(candidate_id, status="held", review_reason="original_article_unreadable_or_mismatched")
+            return {"status": "held", "candidate_id": candidate_id,
+                    "reason": "original_article_unreadable_or_mismatched"}
+        if editorial_exclusion_text(candidate.get("original_headline", ""), article):
+            self.db.update_candidate(candidate_id, status="excluded", review_reason="article_matches_editorial_exclusion")
+            return {"status": "held", "candidate_id": candidate_id,
+                    "reason": "article_matches_editorial_exclusion"}
         verification = self.verification.verify(
             candidate_id, extra_evidence_urls=extra_urls,
-            provided_evidence_text=payload.get("evidence_text"),
+            provided_evidence_text=payload.get("evidence_text"), original_article_text=article,
         )
         if not verification.approved:
             return {"status": "held", "candidate_id": candidate_id,
                     "reasons": verification.reasons, "evidence": verification.evidence}
-        return self.generate_from_verified(candidate_id, verification, extra_urls)
+        return self.generate_from_verified(candidate_id, verification, extra_urls, article_text=article)
 
     def _official_urls(self, candidate: dict[str, Any], extra_urls: list[str] | None = None) -> list[str]:
         raw = _json(candidate.get("raw_json"), {})
@@ -296,14 +305,56 @@ class NewsPipeline:
         return " ".join(chunks)
 
     def _read_original_article(self, candidate: dict[str, Any]) -> str:
+        """Read public same-page structured article text, or article/main HTML.
+
+        Never bypass a paywall, robots policy, or a redirect to another host.
+        Publisher-supplied JSON-LD is useful where visible pages are rendered by
+        JavaScript and do not contain an article element. It is accepted only
+        if its canonical article URL is the same as the requested page.
+        """
         result = self.evidence.client.get(candidate.get("url", ""))
         if not result.ok:
             return ""
-        source_host = (urlparse(candidate.get("url", "")).hostname or "").lower()
+        source_url = candidate.get("url", "")
+        source_host = (urlparse(source_url).hostname or "").lower()
         result_host = (urlparse(result.url).hostname or "").lower()
         if source_host.removeprefix("www.") != result_host.removeprefix("www."):
             return ""
         soup = BeautifulSoup(result.text, "html.parser")
+        structured = []
+        def walk(value):
+            if isinstance(value, list):
+                for entry in value:
+                    yield from walk(entry)
+            elif isinstance(value, dict):
+                yield value
+                if isinstance(value.get("@graph"), list):
+                    yield from walk(value["@graph"])
+        for script in soup.select('script[type="application/ld+json"]'):
+            try:
+                data = json.loads(script.string or script.get_text())
+            except (ValueError, TypeError):
+                continue
+            for item in walk(data):
+                kind = item.get("@type", "")
+                kinds = kind if isinstance(kind, list) else [kind]
+                if not any(k in {"Article", "NewsArticle", "ReportageNewsArticle"} for k in kinds):
+                    continue
+                entity = item.get("mainEntityOfPage")
+                entity_url = entity.get("@id") if isinstance(entity, dict) else entity
+                claimed_url = item.get("url") or entity_url
+                if not isinstance(claimed_url, str) or canonical_url(claimed_url) != canonical_url(result.url):
+                    continue
+                structured.append(item)
+        # Honor an explicit subscription restriction; do not use metadata to
+        # evade a paywall, even if the publisher exposes articleBody there.
+        if any(str(item.get("isAccessibleForFree", "")).lower() == "false" for item in structured):
+            return ""
+        for item in structured:
+            headline = item.get("headline")
+            body = item.get("articleBody")
+            if isinstance(headline, str) and isinstance(body, str) and len(clean_text(body, 12000)) >= 600:
+                return clean_text(headline + " " + body, 12000)
         container = soup.find("article") or soup.find("main")
         if not container:
             return ""
@@ -317,17 +368,22 @@ class NewsPipeline:
                 parts.append(text)
         return clean_text(" ".join(parts), 12000)
 
+    @staticmethod
+    def _article_matches_candidate(candidate: dict[str, Any], article: str) -> bool:
+        title_words = set(re.findall(r"[a-z0-9]{4,}", candidate.get("original_headline", "").lower()))
+        article_words = set(re.findall(r"[a-z0-9]{4,}", article.lower()))
+        return len(article) >= 600 and len(title_words & article_words) >= max(2, len(title_words)//3)
+
     def generate_from_verified(self, candidate_id: str, verification: VerificationResult,
-                               extra_urls: list[str] | None = None) -> dict[str, Any]:
+                               extra_urls: list[str] | None = None,
+                               article_text: str | None = None) -> dict[str, Any]:
         candidate = self.db.get_candidate(candidate_id)
         if not candidate:
             return {"status": "held", "reason": "candidate_not_found"}
         # Read the original article, not just the RSS title/excerpt. Fail
         # closed when blocked, paywalled, too short, or not the same story.
-        article = self._read_original_article(candidate)
-        title_words = set(re.findall(r"[a-z0-9]{4,}", candidate.get("original_headline", "").lower()))
-        article_words = set(re.findall(r"[a-z0-9]{4,}", article.lower()))
-        if len(article) < 600 or len(title_words & article_words) < max(2, len(title_words)//3):
+        article = article_text if article_text is not None else self._read_original_article(candidate)
+        if not self._article_matches_candidate(candidate, article):
             return {"status": "held", "candidate_id": candidate_id,
                     "reason": "original_article_unreadable_or_mismatched"}
         if editorial_exclusion_text(candidate.get("original_headline", ""), article):

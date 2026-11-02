@@ -223,7 +223,7 @@ class ResearchAgent:
         payload = {
             "original_headline": candidate["original_headline"],
             "source_language": candidate.get("language"),
-            "reported_facts_excerpt": candidate.get("body_excerpt", "")[:1800],
+            "reported_facts_excerpt": candidate.get("body_excerpt", "")[:10000],
             "published_at": candidate.get("published_at"),
             "updated_at": candidate.get("updated_at"),
             "verification_evidence": verification.evidence,

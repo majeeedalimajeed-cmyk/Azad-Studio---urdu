@@ -138,6 +138,7 @@ def test_india_today_source_is_allowed(tmp_path):
         language='en',body_excerpt='A national sports tournament announced a schedule in an official statement.'*2,category='sports')
     cid,_=db.insert_candidate(desk.research._to_row(c,'hourly'))
     desk.verification.verify=Mock(return_value=VerificationResult(False,['verification held'],[],'low'))
+    desk._read_original_article=Mock(return_value=('National sports tournament announces schedule. The official sporting event is scheduled for the coming week. '*10))
     out=desk.process_job('verify_story',{'candidate_id':cid})
     assert out['status']=='held' and out['reasons']==['verification held']
     desk.verification.verify.assert_called_once()
@@ -161,3 +162,39 @@ def test_monitor_calls_only_three_operator_sources(tmp_path):
     monitor._indian_express=Mock()
     assert [x.source for x in monitor.monitor_all()]==['the_hindu','india_today','the_wire']
     monitor._indian_express.assert_not_called()
+
+
+def test_public_jsonld_article_extraction_checks_url_and_paywall(tmp_path):
+    import json
+    from types import SimpleNamespace
+    conf=cfg(tmp_path); desk=NewsPipeline(conf,Database(conf.db_path))
+    url='https://thewire.in/politics/article'
+    article={'@type':'NewsArticle','mainEntityOfPage':url,
+             'headline':'Parliament adopts education policy',
+             'articleBody':'Parliament adopted an education policy for public schools after the session. '*12}
+    def page(obj, final=url):
+        return SimpleNamespace(ok=True,url=final,text='<html><script type="application/ld+json">'+json.dumps(obj)+'</script></html>')
+    desk.evidence.client.get=Mock(return_value=page(article))
+    assert len(desk._read_original_article({'url':url}))>600
+    article['isAccessibleForFree']=False
+    desk.evidence.client.get.return_value=page(article)
+    assert desk._read_original_article({'url':url})==''
+    article['isAccessibleForFree']=True;article['mainEntityOfPage']='https://thewire.in/politics/other-story'
+    desk.evidence.client.get.return_value=page(article)
+    assert desk._read_original_article({'url':url})==''
+    desk.evidence.client.get.return_value=page(article,final='https://untrusted.example/article')
+    assert desk._read_original_article({'url':url})==''
+
+
+def test_full_article_is_read_before_verification(tmp_path):
+    conf=cfg(tmp_path);db=Database(conf.db_path);desk=NewsPipeline(conf,db)
+    c=Candidate(source='india_today',publisher='India Today',url='https://www.indiatoday.in/news/story/123',
+        original_headline='National sports tournament announces schedule',published_at=iso(),updated_at=None,
+        language='en',body_excerpt='Short feed excerpt',category='sports')
+    cid,_=db.insert_candidate(desk.research._to_row(c,'hourly'))
+    full='National sports tournament announces schedule. The tournament will take place next week. '*10
+    desk._read_original_article=Mock(return_value=full)
+    desk.verification.verify=Mock(return_value=VerificationResult(False,['held'],[],'low'))
+    desk.process_job('verify_story',{'candidate_id':cid})
+    assert desk.verification.verify.call_args.kwargs['original_article_text']==full
+    assert db.get_candidate(cid)['body_excerpt']=='Short feed excerpt'

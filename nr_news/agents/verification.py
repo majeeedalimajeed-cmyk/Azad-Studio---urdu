@@ -70,12 +70,17 @@ class VerificationAgent:
         self.config = config
 
     def verify(self, candidate_id: str, extra_evidence_urls: list[str] | None = None,
-               provided_evidence_text: str | None = None) -> VerificationResult:
+               provided_evidence_text: str | None = None,
+               original_article_text: str | None = None) -> VerificationResult:
         row = self.db.get_candidate(candidate_id)
         if not row:
             result = VerificationResult(False, ["candidate_not_found"], [], "none")
             self._record(candidate_id, result)
             return result
+        if original_article_text:
+            # The DB retains its short feed excerpt; verification reads the
+            # publisher's full accessible article supplied by the pipeline.
+            row = dict(row, body_excerpt=original_article_text[:12000])
         reasons: list[str] = []
         evidence: list[str] = []
         confidence = "low"
