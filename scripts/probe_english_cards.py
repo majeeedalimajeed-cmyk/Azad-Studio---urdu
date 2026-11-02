@@ -5,6 +5,7 @@ from dataclasses import replace
 from nr_news.config import CONFIG
 from nr_news.db import Database
 from nr_news.pipeline import NewsPipeline
+import nr_news.pipeline as pipeline_module
 from nr_news.models import Candidate, VerificationResult
 from nr_news.util import iso
 
@@ -28,6 +29,8 @@ with TemporaryDirectory() as tmp:
         "AICTE said the initiatives are intended to widen participation by institutions across the country. "
         "Institutions should consult each scheme's guidelines for the relevant eligibility and assistance details.")
     desk._read_original_article=lambda row: paragraph*2
+    # This already-posted example is used in the temporary isolated test only.
+    pipeline_module._already_posted_by_operator=lambda *args: False
     original_call=desk.research.llm.chat_json
     def debug_call(**kwargs):
         output=original_call(**kwargs)
