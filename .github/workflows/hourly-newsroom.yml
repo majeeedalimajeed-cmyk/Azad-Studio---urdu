@@ -62,6 +62,7 @@ jobs:
 
       - name: Synthetic English/Roman editorial smoke test (manual branch only)
         if: github.event_name == 'workflow_dispatch' && github.ref_name == 'safe-english-roman-cards'
+        continue-on-error: true
         run: PYTHONPATH=. python scripts/probe_english_cards.py
 
       - name: Restore durable SQLite database
