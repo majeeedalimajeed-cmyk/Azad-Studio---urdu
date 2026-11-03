@@ -539,7 +539,7 @@ def _demo_media(tmp_path: Path, n: int) -> dict:
     }
 
 
-def test_two_photo_card_layout_passes_visual_inspection(tmp_path):
+def test_single_top_photo_card_layout_passes_visual_inspection(tmp_path):
     cfg = temp_config(tmp_path)
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     ed = fixture["editorial"]
@@ -558,9 +558,9 @@ def test_two_photo_card_layout_passes_visual_inspection(tmp_path):
     assert cards
     card = cards[0]
     assert card.visual_status == "passed"
-    assert card.audit["media_count"] == 2
+    assert card.audit["media_count"] == 1
     assert card.audit["visual_inspection"]["checks"]["photo_1_pixels"] is True
-    assert card.audit["visual_inspection"]["checks"]["photo_2_pixels"] is True
+    assert card.audit["photo_boxes"] == [(40, 244, 1040, 504)]
     assert card.audit["byline"] == BYLINE
     assert "byline_pixels" not in card.audit["visual_inspection"]["checks"]
     assert card.audit["visual_inspection"]["checks"]["narrow_latest_news_ribbon"] is True
@@ -652,7 +652,7 @@ def test_publish_approved_pending_retries_unpublished_editorial(tmp_path):
         "roman_headline": "Roman headline", "roman_bullets": ["Ek", "Do", "Teen"],
         "verification_notes": [], "source_urls": ["https://example.org/story"],
         "publication_time": iso(),
-        "media": [{"credit": "Pixabay / one", "license_ref": "terms"}],
+        "media": None,
     }
     eid, _ = db.insert_editorial(cid, None, content, status="approved")
     db.execute(

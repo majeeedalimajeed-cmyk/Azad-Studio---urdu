@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 
 from .config import CONFIG
 from .models import EditorialContent
@@ -299,8 +299,11 @@ class CardRenderer:
         x0, y0, x1, y1 = box
         w, h = x1 - x0, y1 - y0
         with Image.open(media["local_path"]) as src:
-            im = ImageOps.fit(src.convert("RGB"), (w, h), method=Image.Resampling.LANCZOS,
-                              centering=tuple(media.get("crop_center", (0.5, 0.5))))
+            original = src.convert("RGB")
+            background = ImageOps.fit(original, (w, h), method=Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(28))
+            im = Image.blend(background, Image.new("RGB", (w, h), BLACK), 0.60)
+            fitted = ImageOps.contain(original, (w, h), method=Image.Resampling.LANCZOS)
+            im.paste(fitted, ((w - fitted.width) // 2, (h - fitted.height) // 2))
         mask = Image.new("L", (w, h), 0)
         ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=22, fill=255)
         canvas.paste(im, (x0, y0), mask)
@@ -367,15 +370,20 @@ class CardRenderer:
                    (82, heading_y + 43), (67, heading_y + 35), (52, heading_y + 35)], fill=WHITE)
         d.arc((51, heading_y + 30, 70, heading_y + 53), 270, 90, fill=WHITE, width=3)
 
-        # The original card design is retained; its first section now carries
-        # English in left-to-right text (the model's legacy field name remains).
-        self._draw_headline(canvas, content.urdu_headline, False, urdu_headline_y, headline_h)
-
-        # Up to two rights-cleared photos occupy reserved panels, mirroring the
-        # reference card: one beside the Urdu copy, one beside the Roman copy.
+        # Approved sample: one full-width photo above both language sections.
+        # Text-only fallback keeps the original layout.
         photo_boxes: list[tuple[int, int, int, int]] = []
-        urdu_photo = photos[0] if photos else None
-        roman_photo = photos[1] if len(photos) > 1 else None
+        if photos:
+            photos = photos[:1]
+            photo_box = (40, 244, 1040, 504)
+            self._draw_photo(canvas, photos[0], photo_box)
+            photo_boxes.append(photo_box)
+            urdu_headline_y, urdu_bullets_y, urdu_bullets_h = 518, 588, 213
+            separator_y, roman_headline_y = 808, 826
+            roman_bullets_y, roman_bullets_h = 899, 215
+        self._draw_headline(canvas, content.urdu_headline, False, urdu_headline_y, headline_h)
+        urdu_photo = None
+        roman_photo = None
         urdu_max_width = 900
         urdu_text_x = 135
         urdu_bullet_x = 88
@@ -387,8 +395,8 @@ class CardRenderer:
             urdu_bullet_x = 88
         urdu_end = self._draw_bullets(canvas, urdu_bullets, False, urdu_bullets_y,
                                       urdu_bullets_h, urdu_max_width,
-                                      urdu_text_x, urdu_bullet_x, compact=bool(urdu_photo))
-        if urdu_end > 706:
+                                      urdu_text_x, urdu_bullet_x, compact=bool(photos))
+        if urdu_end > (805 if photos else 706):
             raise LayoutError("Urdu bullet area overflowed its reserved region")
 
         # Separator with diamond.
@@ -409,7 +417,7 @@ class CardRenderer:
             roman_bullet_x = 88
         roman_end = self._draw_bullets(canvas, roman_bullets, False, roman_bullets_y,
                                        roman_bullets_h, roman_max_width, roman_text_x,
-                                       roman_bullet_x, compact=bool(roman_photo))
+                                       roman_bullet_x, compact=bool(photos))
         if roman_end > 1160:
             raise LayoutError("Roman Urdu bullet area overflowed its reserved region")
 
@@ -434,7 +442,7 @@ class CardRenderer:
             "rtl_engine": "libraqm",
             "heading": "LATEST NEWS",
             "heading_box": red_box,
-            "design_reference": "two NEWS IMAGE panels; narrow angled LATEST NEWS ribbon",
+            "design_reference": "single fitted top photo; narrow angled LATEST NEWS ribbon" if photos else "original text-led layout",
             "byline": BYLINE,
             "page_number": page_number,
             "page_count": page_count,

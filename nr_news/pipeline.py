@@ -17,6 +17,7 @@ from .agents import (CardAgent, MediaAgent, PublishingAgent, ResearchAgent,
                      VideoWorkflow)
 from .agents.verification import EvidenceFetcher, editorial_exclusion_text
 from .config import CONFIG
+from .curated_photos import select_curated_photo
 from .db import Database
 from .llm import AgentUnavailable
 from .models import Candidate, EditorialContent, SourceResult, VerificationResult
@@ -201,6 +202,10 @@ class NewsPipeline:
             if not card_row:
                 continue
             if not Path(card_row["file_path"]).exists():
+                if _json(editorial.get("media_json"), []):
+                    # A missing photo card must be rebuilt from its original
+                    # verified media, not silently replaced by text-only output.
+                    continue
                 # Card PNGs are not persisted between CI runs; re-render from
                 # the stored editorial (fresh licensed photos when available)
                 # so an approved story is never stranded by a missing file.
@@ -215,13 +220,9 @@ class NewsPipeline:
                     media=None,
                 )
                 candidate = self.db.get_candidate(editorial["candidate_id"]) or {}
-                raw = _json(candidate.get("raw_json"), {}) if candidate else {}
-                media_list = (
-                    self.media.select_many(
-                        candidate, raw.get("media"),
-                        query_context={"pixabay_query": raw.get("pixabay_query")},
-                    ) if candidate else []
-                )
+                # Old pending editorials have no vetted illustrative-photo
+                # metadata in their caption; retain the original text layout.
+                media_list = []
                 rendered = self.cards.render(editorial["id"], content,
                                              media=media_list or None)
                 if not rendered:
@@ -473,10 +474,9 @@ class NewsPipeline:
         raw = _json(candidate.get("raw_json"), {})
         source_urls = [candidate["url"]] + official_urls
         source_urls = list(dict.fromkeys(source_urls))
-        # Automated runs use a text-only card. Relevant, rights-cleared photos
-        # can be added through a separately reviewed manual workflow; search
-        # results and old cached media are never posted automatically.
-        media_list: list[dict[str, Any]] = []
+        # Only hash-pinned, individually reviewed stock assets with narrowly
+        # matching headlines qualify. Other stories remain text-only.
+        media_list = select_curated_photo(candidate.get("original_headline", ""), urdu.get("urdu_headline", ""), article)
         content = EditorialContent(
             urdu_headline=clean_text(urdu["urdu_headline"], 240),
             urdu_bullets=[clean_text(x, 320) for x in urdu["urdu_bullets"]],
