@@ -320,6 +320,7 @@ def _verified_current_card(db, editorial_id, card):
     path.write_bytes(b"simulated card")
     card["sha256"] = sha256_file(path)
     db.set_setting(f"card_current_layout:{card['sha256']}", "true")
+    db.set_setting(f"card_reviewed_photo:{card['sha256']}", "true")
     db.set_setting(f"english_roman_verified:{editorial_id}", "true")
 
 

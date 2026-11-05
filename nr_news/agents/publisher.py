@@ -85,6 +85,8 @@ class PublishingAgent:
                 return {"status": "held", "reason": "new_format_verification_required"}
             if not digest or self.db.get_setting(f"card_current_layout:{digest}") != "true":
                 return {"status": "held", "reason": "current_card_rebuild_required"}
+            if self.db.get_setting(f"card_reviewed_photo:{digest}") != "true":
+                return {"status": "held", "reason": "reviewed_photo_required"}
             try:
                 if sha256_file(card_row["file_path"]) != digest:
                     return {"status": "held", "reason": "current_card_hash_mismatch"}

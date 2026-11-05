@@ -80,7 +80,7 @@ def test_denied_source_is_not_processed(tmp_path):
     assert p.process_job('verify_story',{'candidate_id':cid})['reason']=='source_not_in_operator_list'
 
 
-def test_verified_english_roman_card_has_no_unreviewed_photo(tmp_path):
+def test_story_without_reviewed_photo_is_held_before_generation(tmp_path):
     conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
     c=Candidate(source='the_hindu',publisher='The Hindu',url='https://www.thehindu.com/news/policy',
         original_headline='Telangana cabinet approves education policy',published_at=iso(),updated_at=None,
@@ -97,13 +97,13 @@ def test_verified_english_roman_card_has_no_unreviewed_photo(tmp_path):
     p.validator.validate=Mock(return_value={'ok':True,'errors':[],'warnings':[],'model_review':{'consistent':True}})
     p.research.llm.chat_json=Mock(return_value={'supported':True,'important':True,'current_news':True,'straight_news':True,'issues':[]})
     result=p.generate_from_verified(cid,VerificationResult(True,[],['source checked'],'high'))
-    assert result['status']=='rendered'
-    assert len(result['cards'])==1 and Path(result['cards'][0]).exists()
-    assert db.get_setting('english_roman_verified:'+result['editorial_id'])=='true'
-    assert db.get_editorial(result['editorial_id'])['media_json'] in ('null', None)
+    assert result['status']=='held'
+    assert result['reason']=='reviewed_photo_unavailable'
+    p.research.summarize_urdu.assert_not_called()
 
 
-def test_factual_review_failure_prevents_rendering(tmp_path):
+def test_factual_review_failure_prevents_rendering(tmp_path, monkeypatch):
+    monkeypatch.setattr('nr_news.pipeline.select_curated_photo', lambda *args: [{'illustrative': True}])
     conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
     c=Candidate(source='the_hindu',publisher='The Hindu',url='https://www.thehindu.com/news/policy',
         original_headline='Telangana cabinet approves education policy',published_at=iso(),updated_at=None,
@@ -222,7 +222,8 @@ def test_current_video_page_is_not_used_as_news_article(tmp_path):
     desk._read_original_article.assert_not_called()
 
 
-def test_continuation_cards_are_held_as_a_whole(tmp_path):
+def test_continuation_cards_are_held_as_a_whole(tmp_path, monkeypatch):
+    monkeypatch.setattr('nr_news.pipeline.select_curated_photo', lambda *args: [{'illustrative': True}])
     conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
     c=Candidate(source='the_hindu',publisher='The Hindu',url='https://www.thehindu.com/news/policy',
         original_headline='Telangana cabinet approves education policy',published_at=iso(),updated_at=None,
@@ -243,7 +244,8 @@ def test_continuation_cards_are_held_as_a_whole(tmp_path):
     p.publisher.publish.assert_not_called()
 
 
-def test_opinion_or_historical_review_holds_card(tmp_path):
+def test_opinion_or_historical_review_holds_card(tmp_path, monkeypatch):
+    monkeypatch.setattr('nr_news.pipeline.select_curated_photo', lambda *args: [{'illustrative': True}])
     conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
     c=Candidate(source='the_wire',publisher='The Wire',url='https://thewire.in/news/story',
         original_headline='Parliament reviews education policy',published_at=iso(),updated_at=None,
@@ -275,7 +277,8 @@ def test_date_components_from_iso_inventory_do_not_cause_false_hold():
     assert data['requires_human_review'] is True
 
 
-def test_mixed_new_and_completed_projects_require_clear_foundation_status(tmp_path):
+def test_mixed_new_and_completed_projects_require_clear_foundation_status(tmp_path, monkeypatch):
+    monkeypatch.setattr('nr_news.pipeline.select_curated_photo', lambda *args: [{'illustrative': True}])
     conf=cfg(tmp_path);db=Database(conf.db_path);p=NewsPipeline(conf,db)
     c=Candidate(source='india_today',publisher='India Today',url='https://www.indiatoday.in/news/project',
         original_headline='Minister opens and launches new projects',published_at=iso(),updated_at=None,
@@ -302,3 +305,17 @@ def test_legacy_manual_story_dedup_checks_full_articles():
     assert _already_posted_manually('AICTE launches MODROBS with IDEA Lab and Margdarshan')
     assert _already_posted_manually('Revanth Reddy says treated wastewater should be used')
     assert not _already_posted_manually('Telangana ministers discuss a new school policy')
+
+
+def test_live_publisher_holds_existing_text_only_cards(tmp_path):
+    from nr_news.util import sha256_file
+    conf=replace(cfg(tmp_path),dry_run=False)
+    db=Database(conf.db_path);g=Mock()
+    eid='existing-text-card';p=Path(tmp_path/'card.png');p.write_bytes(b'text-only card')
+    digest=sha256_file(p)
+    db.set_setting('english_roman_verified:'+eid,'true')
+    db.set_setting('card_current_layout:'+digest,'true')
+    db.get_editorial=Mock(return_value={'status':'approved'})
+    out=PublishingAgent(db=db,graph=g,config=conf).publish(eid,{'visual_status':'passed','file_path':str(p),'sha256':digest,'page_count':1},dry_run=False)
+    assert out['reason']=='reviewed_photo_required'
+    g.publish_photo.assert_not_called()

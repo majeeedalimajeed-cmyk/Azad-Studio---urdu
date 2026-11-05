@@ -61,7 +61,7 @@ class NewsPipeline:
                                          redact(result.message, self.config.secret_values),
                                          result.http_status)
         new_ids = self.research.ingest(results, mode)
-        requeued = self.requeue_policy_excluded() + self.requeue_llm_held() + self.requeue_verification_held()
+        requeued = self.requeue_policy_excluded() + self.requeue_photo_held() + self.requeue_llm_held() + self.requeue_verification_held()
         publish_retried = self.publish_approved_pending()
         self.db.insert_api_event("scheduler", "scan", "ok",
                                  f"{mode} scan examined {len(results)} configured sources",
@@ -106,6 +106,24 @@ class NewsPipeline:
                                       dedupe_key=f"verify:{c['id']}", priority=45)
             if job:
                 count += 1
+        return count
+
+    def requeue_photo_held(self, limit: int = 10) -> int:
+        """Retry photo-held stories only once a matching reviewed photo exists."""
+        count = 0
+        for review in self.db.open_reviews(["reviewed_photo_unavailable"], limit=100):
+            if count >= limit:
+                break
+            c = self.db.get_candidate(review.get("candidate_id") or "") or {}
+            pub = parse_iso(c.get("published_at"))
+            if not c or not pub or not (0 <= (utcnow()-pub).total_seconds()/3600 <= self.config.max_story_age_hours):
+                continue
+            if not source_allowed(c) or not select_curated_photo(c.get("original_headline") or "", c.get("original_headline") or "", c.get("body_excerpt") or ""):
+                continue
+            self.db.set_review_status(review["id"], "requeued")
+            self.db.enqueue_job("verify_story", {"candidate_id": c["id"]},
+                                dedupe_key=f"verify:{c['id']}", priority=42)
+            count += 1
         return count
 
     def requeue_llm_held(self, limit: int = 10) -> int:
@@ -433,6 +451,15 @@ class NewsPipeline:
         official_urls = self._official_urls(candidate, extra_urls)
         official_evidence = self._official_evidence_text(official_urls)
         evidence_text = article + " " + official_evidence
+        # The operator requires one relevant, rights-cleared photo on every
+        # automatic card. Hold before spending model quota when none exists.
+        curated = select_curated_photo(candidate.get("original_headline", ""), candidate.get("original_headline", ""), article)
+        if not curated:
+            self.db.close_open_reviews(candidate_id, "reviewed_photo_unavailable")
+            self.db.add_review(candidate_id, verification.cluster_id, "reviewed_photo_unavailable", {
+                "reason": "No relevant reviewed photo available; wait rather than publish text-only.",
+            })
+            return {"status": "held", "candidate_id": candidate_id, "reason": "reviewed_photo_unavailable"}
         # Model reads the real article, while the original DB record stays immutable.
         candidate_for_generation = dict(candidate, body_excerpt=article[:10000])
         try:
@@ -506,6 +533,9 @@ class NewsPipeline:
         # Only hash-pinned, individually reviewed stock assets with narrowly
         # matching headlines qualify. Other stories remain text-only.
         media_list = select_curated_photo(candidate.get("original_headline", ""), urdu.get("urdu_headline", ""), article)
+        if not media_list:
+            self.db.add_review(candidate_id, verification.cluster_id, "reviewed_photo_unavailable", {"reason": "Photo no longer matches generated headline."})
+            return {"status": "held", "candidate_id": candidate_id, "reason": "reviewed_photo_unavailable"}
         content = EditorialContent(
             urdu_headline=clean_text(urdu["urdu_headline"], 240),
             urdu_bullets=[clean_text(x, 320) for x in urdu["urdu_bullets"]],

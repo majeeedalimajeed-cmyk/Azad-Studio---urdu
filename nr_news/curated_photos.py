@@ -24,7 +24,7 @@ def select_curated_photo(headline: str, english_headline: str, article: str = ""
     text = ' '.join((headline or '', english_headline or ''))
     # A real landmark is relevant to a Paraguayan presidential political
     # story, but never present it as a photo of the protest or other event.
-    if re.search(r'\bparaguay\b', text, re.I) and re.search(r'\b(?:president|presidential|pena|peña|impeach\w*)\b', text, re.I):
+    if re.search(r'\bparaguay\b', text, re.I) and re.search(r'\b(?:president|presidential|pena|peña|impeach\w*)\b', text + ' ' + article[:1400], re.I):
         kind='paraguay_presidency'
     elif RISK.search(text) or RISK.search(article): return []
     elif re.search(r'\bfirecrackers?\b', text, re.I) or (re.search(r'\bcrackers?\b', text, re.I) and re.search(r'\b(?:fireworks?|supreme court|pollution|green)\b', text, re.I)):

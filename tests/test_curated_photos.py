@@ -52,3 +52,22 @@ def test_paraguay_president_file_photo_disclosed_even_if_unrest():
     assert result and result[0]['curated_topic']=='paraguay_presidency'
     assert 'not a photo of the reported event' in result[0]['caption_disclosure']
     assert not select_curated_photo('Paraguay farmers grow wheat','Agricultural news')
+
+
+def test_reviewed_top_photo_marker_recorded_and_unreviewed_not_marked(tmp_path):
+    from unittest.mock import Mock
+    from dataclasses import replace
+    from nr_news.agents.card import CardAgent
+    from nr_news.config import CONFIG
+    from nr_news.models import EditorialContent
+    from nr_news.util import iso
+    cfg=replace(CONFIG,card_dir=tmp_path/'cards',audit_dir=tmp_path/'audit')
+    cfg.card_dir.mkdir();cfg.audit_dir.mkdir()
+    content=EditorialContent(urdu_headline='Paraguay president faces impeachment',urdu_bullets=['One point.','Two points.','Three points.'],roman_headline='Paraguay sadar par impeachment',roman_bullets=['Ek baat.','Do baat.','Teen baat.'],verification_notes=[],source_urls=[],publication_time=iso(),media=None)
+    media=select_curated_photo(content.urdu_headline,content.urdu_headline)
+    db=Mock();cards=CardAgent(db=db,config=cfg).render('editorial-id',content,media)
+    assert cards[0].visual_status=='passed'
+    db.set_setting.assert_any_call('card_reviewed_photo:'+cards[0].sha256,'true')
+    db.reset_mock();bad=[dict(media[0], rights_reviewed_by='')]
+    cards=CardAgent(db=db,config=cfg).render('editorial-id',content,bad)
+    assert not any(call.args[0].startswith('card_reviewed_photo:') for call in db.set_setting.call_args_list)
