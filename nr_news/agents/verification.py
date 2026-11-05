@@ -21,14 +21,13 @@ if VENDOR.exists() and str(VENDOR) not in sys.path:
     sys.path.insert(0, str(VENDOR))
 
 EXCLUSION_PATTERNS = re.compile(
-    r"\bprotest\w*\b|\brall(?:y|ies)\b|impeachment|vote[ -]?(?:theft|chori)|"
-    r"special intensive revision|\bsir\b|\bresign\w*.*demand|\bdemand\w*.*resign|"
-    r"مواخذ|ووٹ چوری|graphic|dead body|لاش|violent riot|پرتشدد فساد|rumou?r|افواہ|unverified|غیر مصدقہ",
+    r"\bgraphic(?: violence| images?| footage)?\b|\bdead bod(?:y|ies)\b|لاش|"
+    r"rumou?r|افواہ|unverified|غیر مصدقہ",
     re.I,
 )
 
 def editorial_exclusion_text(*parts: str) -> bool:
-    """Exclude protest coverage and graphic/unverified content."""
+    """Allow protest/war reporting while holding graphic or unverified material."""
     return bool(EXCLUSION_PATTERNS.search(" ".join(str(part or "") for part in parts)))
 
 SENSITIVE_PATTERNS = re.compile(
@@ -96,7 +95,7 @@ class VerificationAgent:
             row.get("original_headline", ""), row.get("url", ""),
             row.get("category", ""), row.get("body_excerpt", ""),
         ):
-            reasons.append("Editorial exclusion: crime, graphic violence, suicide/accident, rumor or unsupported allegation.")
+            reasons.append("Editorial exclusion: graphic or unverified material.")
             result = VerificationResult(False, reasons, evidence, "none")
             self.db.update_candidate(candidate_id, status="excluded", review_reason="editorial_exclusion")
             self._record(candidate_id, result)

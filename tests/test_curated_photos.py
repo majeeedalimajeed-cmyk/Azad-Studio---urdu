@@ -45,3 +45,10 @@ def test_illustrative_notice_in_caption_not_on_photo(tmp_path):
     assert 'illustrative stock image' in caption
     ed['media_json']='[]'
     assert 'illustrative stock image' not in agent.build_caption(ed,'abc123')
+
+
+def test_paraguay_president_file_photo_disclosed_even_if_unrest():
+    result=select_curated_photo('Paraguay president faces impeachment', 'Paraguay President impeachment bid', 'Protesters demonstrated in Asuncion.')
+    assert result and result[0]['curated_topic']=='paraguay_presidency'
+    assert 'not a photo of the reported event' in result[0]['caption_disclosure']
+    assert not select_curated_photo('Paraguay farmers grow wheat','Agricultural news')

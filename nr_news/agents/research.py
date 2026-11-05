@@ -56,9 +56,7 @@ PRIORITY_PATTERNS = {
         r"میٹرو|ایئرپورٹ|سڑک|پل|بجلی|پانی|آبپاشی|ہسپتال|فصل|کسان|امتحان|بھرتی", re.I),
 }
 
-CONTROVERSIAL_PROTEST = re.compile(
-    r"impeachment|resign\w+ (demand|call)|demand\w* .*resign|vote chori|vote theft|"
-    r"مواخذ|استعفیٰ|ووٹ چوری", re.I)
+UNREST = re.compile(r"\bprotest\w*\b|\b(?:riot|riots|rioting|demonstration|demonstrations|rally|rallies|unrest|impeachment)\b", re.I)
 
 RESEARCH_SYSTEM = """You are an English news editor. Use only the supplied original article and verified evidence.
 Only write straight-news coverage of an event that happened recently, not opinion, columns, historical retrospectives or promotional material. Never present a past event as happening now; preserve the exact timing of the event. Write a concise original English headline and exactly three brief English bullets. Each bullet must be at most 105 characters including spaces so both languages fit on one card. The schema has legacy key names: put English in urdu_headline and urdu_bullets, NOT Urdu script.
@@ -107,6 +105,8 @@ class ResearchAgent:
                 score += 5
         elif war:
             score = 40
+        elif UNREST.search(text):
+            score = 38
         elif regional:
             score = 35
         elif international:
@@ -121,21 +121,20 @@ class ResearchAgent:
 
     @staticmethod
     def facebook_bucket(candidate: Candidate) -> str:
-        """What Facebook may auto-publish (operator, 29 Oct 2026):
-        politics, government decisions, war, or the day's important
-        regional news. Everything else returns 'other' and is held
-        back from the Facebook queue — no filler stories. Controversial
-        protest material (resignation/impeachment demands, vote-theft
-        allegations) is never published, per operator rule."""
+        """Classify stories; protests and unrest remain eligible for review.
+
+        Verification and source-based factual review still apply; this bucket
+        does not approve unverified claims or create publication permission.
+        """
         text = " ".join([
             candidate.original_headline, candidate.body_excerpt, candidate.url,
             candidate.category or "",
         ])
-        if CONTROVERSIAL_PROTEST.search(text):
-            return "other"
         section = (candidate.category or "").split(",")[0].strip().lower()
         if PRIORITY_PATTERNS["war"].search(text):
             return "war"
+        if UNREST.search(text):
+            return "politics"
         if PRIORITY_PATTERNS["govt_decision"].search(text):
             return "govt"
         if PRIORITY_PATTERNS["political"].search(
@@ -163,7 +162,7 @@ class ResearchAgent:
                     self.db.update_candidate(cid, status="excluded", review_reason="editorial_exclusion")
                     self.db.insert_api_event(
                         "agent_a", "editorial_filter", "excluded",
-                        "No-crime editorial policy excluded this candidate before verification.",
+                        "Graphic or unverified content excluded before verification.",
                         details={"candidate_id": cid, "headline": candidate.original_headline},
                     )
                     continue

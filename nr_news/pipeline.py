@@ -16,6 +16,7 @@ from .agents import (CardAgent, MediaAgent, PublishingAgent, ResearchAgent,
                      RomanUrduTranslatorAgent, TranslationValidator, VerificationAgent,
                      VideoWorkflow)
 from .agents.verification import EvidenceFetcher, editorial_exclusion_text
+from .agents.research import UNREST
 from .config import CONFIG
 from .curated_photos import select_curated_photo
 from .db import Database
@@ -24,7 +25,7 @@ from .models import Candidate, EditorialContent, SourceResult, VerificationResul
 from .sources import SourceMonitor
 from .source_policy import source_allowed
 from .util import (canonical_url, clean_text, iso, is_official_url, json_dumps,
-                   numeric_atoms, redact, sha256_text)
+                   numeric_atoms, redact, sha256_text, parse_iso, utcnow)
 
 
 def _already_posted_manually(text: str) -> bool:
@@ -60,7 +61,7 @@ class NewsPipeline:
                                          redact(result.message, self.config.secret_values),
                                          result.http_status)
         new_ids = self.research.ingest(results, mode)
-        requeued = self.requeue_llm_held() + self.requeue_verification_held()
+        requeued = self.requeue_policy_excluded() + self.requeue_llm_held() + self.requeue_verification_held()
         publish_retried = self.publish_approved_pending()
         self.db.insert_api_event("scheduler", "scan", "ok",
                                  f"{mode} scan examined {len(results)} configured sources",
@@ -78,6 +79,34 @@ class NewsPipeline:
             "requeued_held": requeued,
             "publish_retried": publish_retried,
         }
+
+    def requeue_policy_excluded(self, limit: int = 15) -> int:
+        """Reconsider fresh protest reports excluded under the old policy.
+
+        They still must pass the full source, factual, and duplicate checks.
+        Never revive unrelated exclusions, stale reports, or non-allowlisted sources.
+        """
+        count = 0
+        rows = self.db.candidates_by_status("excluded", limit=500)
+        for c in rows:
+            if count >= limit:
+                break
+            if c.get("review_reason") not in {"editorial_exclusion", "article_matches_editorial_exclusion"}:
+                continue
+            pub = parse_iso(c.get("published_at"))
+            if not pub or not (-2 <= (utcnow()-pub).total_seconds()/3600 <= self.config.max_story_age_hours):
+                continue
+            if not source_allowed(c):
+                continue
+            parts = (c.get("original_headline") or "", c.get("body_excerpt") or "", c.get("url") or "")
+            if not UNREST.search(" ".join(parts)) or editorial_exclusion_text(*parts):
+                continue
+            self.db.update_candidate(c["id"], status="new", review_reason=None)
+            job = self.db.enqueue_job("verify_story", {"candidate_id": c["id"]},
+                                      dedupe_key=f"verify:{c['id']}", priority=45)
+            if job:
+                count += 1
+        return count
 
     def requeue_llm_held(self, limit: int = 10) -> int:
         """Retry stories held only because the LLM gateway was unavailable.
@@ -452,7 +481,7 @@ class NewsPipeline:
                 system=("Independently check every English and Roman Urdu claim against the original article. "
                         "Require exact support for names, dates, figures and attribution; proposals remain proposals. "
                         "Do not confuse completed projects opened with future projects whose foundations were laid, in either language. "
-                        "Reject unsupported claims, uncertainty, mismatches, and prohibited protest coverage. "
+                        "Reject unsupported claims, uncertainty and mismatches. For protests, war and unrest distinguish independently verified facts from attributed statements and do not assert disputed claims as fact. Avoid graphic detail. "
                         "Check factual event dates and tense: never treat a retrospective about an old event as a new event. "
                         "Judge whether this is straight news, not opinion, retrospective analysis, commentary or promotion. "
                         "Judge whether this reports an important event that occurred within the last 36 hours. "
@@ -502,11 +531,11 @@ class NewsPipeline:
             content.roman_headline, " ".join(content.roman_bullets),
             candidate.get("original_headline", ""), candidate.get("body_excerpt", ""),
         ):
-            self.db.add_review(candidate_id, verification.cluster_id, "no_crime_policy_hold", {
-                "reason": "Generated editorial matched the no-crime exclusion filter.",
+            self.db.add_review(candidate_id, verification.cluster_id, "graphic_unverified_policy_hold", {
+                "reason": "Generated editorial matched the graphic/unverified exclusion filter.",
             })
             return {"status": "held", "candidate_id": candidate_id,
-                    "reason": "No-crime editorial policy hold"}
+                    "reason": "Graphic/unverified editorial policy hold"}
         status = "approved" if (
             self.config.auto_approve_verified and self.config.operator_approved
             and self.config.auto_post_enabled

@@ -186,7 +186,7 @@ def test_expanded_crime_filter_and_priority_ranking(tmp_path):
     assert ResearchAgent.priority(world) > ResearchAgent.priority(development)
 
 
-def test_crime_candidate_is_excluded_before_verification_job(tmp_path):
+def test_protest_candidate_is_queued_for_verification(tmp_path):
     cfg = temp_config(tmp_path)
     db = Database(cfg.db_path)
     pipeline = NewsPipeline(cfg, db)
@@ -198,10 +198,10 @@ def test_crime_candidate_is_excluded_before_verification_job(tmp_path):
     result = pipeline.scan("hourly", source_results=[
         SourceResult("test_source", True, 1, "test", candidates=[candidate])
     ])
-    assert result["jobs_queued"] == 0
+    assert result["jobs_queued"] == 1
     rows = db.query("SELECT status, review_reason FROM candidates")
-    assert rows and rows[0]["status"] == "excluded"
-    assert rows[0]["review_reason"] == "editorial_exclusion"
+    assert rows and rows[0]["status"] == "new"
+    assert rows[0]["review_reason"] is None
 
 
 def test_high_priority_job_is_claimed_first(tmp_path):
@@ -1327,3 +1327,25 @@ def test_instagram_confirmed_media_survives_permalink_error(tmp_path):
     assert result['media_id'] == 'media'
     assert db.get_setting('instagram_media_for_post') == 'media'
     assert agent._cross_post_instagram('page','post','caption')['status'] == 'already_published'
+
+
+def test_requeue_fresh_previously_excluded_protest_only(tmp_path):
+    cfg = temp_config(tmp_path, max_story_age_hours=36)
+    db = Database(cfg.db_path)
+    pipeline = NewsPipeline(cfg, db)
+    protest = sample_candidate(source='india_today', publisher='India Today',
+        url='https://www.indiatoday.in/world/story/paraguay-protest-1',
+        original_headline='Paraguay protesters demand president resignation',
+        body_excerpt='Protesters marched in Asuncion after the bank closure.')
+    cid,_ = db.insert_candidate(pipeline.research._to_row(protest,'hourly'))
+    db.update_candidate(cid,status='excluded',review_reason='editorial_exclusion')
+    graphic = sample_candidate(source='india_today',publisher='India Today',
+        url='https://www.indiatoday.in/world/story/graphic-protest-2',
+        original_headline='Protest with graphic violence',body_excerpt='Graphic violence.')
+    gid,_=db.insert_candidate(pipeline.research._to_row(graphic,'hourly'))
+    db.update_candidate(gid,status='excluded',review_reason='editorial_exclusion')
+    assert pipeline.requeue_policy_excluded() == 1
+    assert db.get_candidate(cid)['status']=='new'
+    assert db.get_candidate(gid)['status']=='excluded'
+    assert pipeline.requeue_policy_excluded() == 0
+    assert db.claim_job()['type']=='verify_story'

@@ -49,10 +49,10 @@ def test_legacy_cards_cannot_be_posted(tmp_path):
     graph.publish_photo.assert_not_called()
 
 
-def test_excludes_protest_and_vote_theft():
-    assert editorial_exclusion_text('India bloc protest in Delhi')
-    assert editorial_exclusion_text('Party demands release of protesters')
-    assert editorial_exclusion_text('Vote theft claims')
+def test_allows_protests_and_vote_theft_to_reach_verification():
+    assert not editorial_exclusion_text('India bloc protest in Delhi')
+    assert not editorial_exclusion_text('Party demands release of protesters')
+    assert not editorial_exclusion_text('Vote theft claims')
     assert not editorial_exclusion_text('Telangana cabinet approves new water project')
     assert not editorial_exclusion_text('Mentoring by established institutions')
     assert not editorial_exclusion_text('Stabbing reported')

@@ -152,7 +152,7 @@ def cmd_bootstrap_test_post(args) -> int:
         f"- Caption marker: `{publish.get('caption_marker') or 'not returned'}`\n"
         f"- Database test-post flag: `{pipeline.db.get_setting('facebook_test_post_passed')}`\n\n"
         "This post was explicitly approved by the operator with "
-        "`--i-understand-this-posts-publicly`. No rumor, crime story, copyrighted article body, "
+        "`--i-understand-this-posts-publicly`. No unverified claim, copyrighted article body, "
         "or unlicensed image was used. The exact supplied monogram was verified by SHA-256.\n",
         encoding="utf-8",
     )
@@ -200,7 +200,7 @@ def cmd_report(args) -> int:
         f"- Operator approved: `{CONFIG.operator_approved}`",
         f"- Auto post enabled: `{CONFIG.auto_post_enabled}`",
         f"- Auto approve verified editorials: `{CONFIG.auto_approve_verified}`",
-        f"- Editorial priority: regional politics first, then national/international politics, then public-interest development; crime excluded",
+        f"- Editorial priority: named leaders and politics first, then war, important protests, regional and world news",
         f"- Page identity API-confirmed: `{bool(status['facebook_page_id_confirmed'])}`",
         f"- API-confirmed Page ID: `{status['facebook_page_id_confirmed'] or 'not confirmed'}`",
         f"- API-confirmed Page name: `{status['facebook_page_name_confirmed'] or 'not confirmed'}`",
@@ -256,9 +256,9 @@ def cmd_report(args) -> int:
         "",
         "## Launch-test status",
         "- Exact supplied monogram verified at top and bottom of rendered card: PASS",
-        "- Urdu RTL shaping with Noto Nastaliq Urdu/libraqm: PASS",
+        "- English and Roman Urdu card format enabled",
         "- Roman Urdu number/name/uncertainty validation: PASS on verified fixture",
-        "- Crime and rumor exclusion rules implemented: PASS (see tests)",
+        "- Graphic and unverified content held; protest and war coverage eligible for verification",
         "- Duplicate URL/content/cluster prevention implemented: PASS (see tests)",
         "- Empty scan publishes nothing: PASS (see tests)",
         f"- Facebook Page identity/targeting: {'PASS (API-confirmed Page ID and name)' if status['facebook_page_id_confirmed'] else 'HOLD (Page identity not API-confirmed)'}",
@@ -425,12 +425,12 @@ def cmd_selftest(_args) -> int:
         "Only the configured profile URL is accepted; API-confirmed Page ID/name, exact expected name, permissions and token still require live credentials."
     )
     checks = [
-        ("PASS", "All four sources monitored",
-         "SourceMonitor exercises Munsif RSS, Etemaad Urdu index, Indian Express feed, and The Wire REST API; outage/snapshot paths are tested."),
+        ("PASS", "Three approved sources monitored",
+         "SourceMonitor accepts only The Hindu, India Today and The Wire."),
         ("PASS", "Stories are fresh and verified before publication",
          "VerificationAgent checks timestamps, official evidence, independent corroboration, claim status and uncertainty; the launch fixture uses an official TGPSC web note."),
-        ("PASS", "No crime-focused stories are published",
-         "Expanded no-crime exclusion regexes at ingest, verification and generated editorial stages, with regression tests."),
+        ("PASS", "Graphic and unverified material held",
+         "Protest, riot and war reports remain eligible for factual verification; graphic material and unverified claims are held."),
         ("PASS", "More political news with regional-first ordering",
          "Additive priority ranks regional politics first, then national/international politics, then development; jobs are claimed by priority."),
         ("PASS", "Urdu summaries preserve original facts",

@@ -160,7 +160,7 @@ def test_facebook_bucket_only_importance_categories():
     assert ResearchAgent.priority(war) > ResearchAgent.priority(other)
 
 
-def test_controversial_protest_news_is_held_back_from_facebook():
+def test_protest_news_is_eligible_for_factual_review():
     from nr_news.agents.research import ResearchAgent
 
     protest = _cand(original_headline="Bloc plans mock impeachment, demands CEC resignation",
@@ -168,5 +168,5 @@ def test_controversial_protest_news_is_held_back_from_facebook():
                     category="politics")
     factual = _cand(original_headline="Parliament passes new bill after debate",
                     body_excerpt="Lok Sabha government bill voting.", category="politics")
-    assert ResearchAgent.facebook_bucket(protest) == "other"
+    assert ResearchAgent.facebook_bucket(protest) == "politics"
     assert ResearchAgent.facebook_bucket(factual) == "politics"

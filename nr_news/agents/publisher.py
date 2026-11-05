@@ -47,8 +47,11 @@ class PublishingAgent:
         # Operator rule: no URLs and no photographer credits in the public
         # caption. Source links, credits and license references remain in
         # the DB/audit trail only.
-        if isinstance(media, list) and any(isinstance(m, dict) and m.get("illustrative") is True for m in media):
-            lines.append("Photo: illustrative stock image, not a photograph of the reported event.")
+        if isinstance(media, list):
+            for item in media:
+                if isinstance(item, dict) and item.get("illustrative") is True:
+                    lines.append(str(item.get("caption_disclosure") or "Photo: illustrative stock image, not a photograph of the reported event."))
+                    break
         lines.append(f"AZAD STUDIO ref: {marker}")
         return redact("\n".join(lines), self.config.secret_values)
 
