@@ -78,6 +78,9 @@ class GitHubPublicationLedger:
                     row.get('status') not in {'reserved', 'confirmed', 'uncertain', 'rejected'} or
                     not row.get('url') or not row.get('headline') or not parse_iso(row.get('created_at'))):
                     raise ValueError('invalid ledger record')
+                nested = row.get('stories', [])
+                if not isinstance(nested, list) or any(not isinstance(x, dict) or not x.get('url') or not x.get('headline') or 'stories' in x for x in nested):
+                    raise ValueError('invalid card story records')
             return data, sha
         except LedgerUnavailable:
             raise
@@ -99,6 +102,9 @@ class GitHubPublicationLedger:
 
     @staticmethod
     def _duplicate(record: dict[str, Any], candidate: dict[str, Any]) -> bool:
+        for item in record.get('stories', []):
+            if GitHubPublicationLedger._duplicate({**item, 'created_at': record.get('created_at')}, candidate):
+                return True
         url = candidate.get('canonical_url') or candidate.get('url') or ''
         old_url = record.get('url') or ''
         if url and old_url and canonical_url(url) == canonical_url(old_url):
@@ -113,22 +119,37 @@ class GitHubPublicationLedger:
 
     def reserve(self, *, key: str, candidate: dict[str, Any], editorial_id: str,
                 page_id: str, caption_marker: str) -> None:
-        url = candidate.get('canonical_url') or candidate.get('url')
-        headline = candidate.get('original_headline')
-        if not url or not headline or not key or not page_id:
-            raise LedgerUnavailable('Durable ledger requires a source URL, headline, key and Page ID')
+        self.reserve_many(key=key, candidates=[candidate], editorial_id=editorial_id,
+                          page_id=page_id, caption_marker=caption_marker)
+
+    def reserve_many(self, *, key: str, candidates: list[dict[str, Any]], editorial_id: str,
+                     page_id: str, caption_marker: str) -> None:
+        """Atomically reserve every story on a single card before upload."""
+        if not candidates or not key or not page_id:
+            raise LedgerUnavailable('Durable ledger requires stories, key and Page ID')
+        stories = []
+        for candidate in candidates:
+            url = candidate.get('canonical_url') or candidate.get('url')
+            title = candidate.get('original_headline')
+            if not url or not title:
+                raise LedgerUnavailable('Each card story needs a source URL and headline')
+            stories.append({'url': canonical_url(url), 'headline': str(title)[:500]})
+        for idx, story in enumerate(stories):
+            for earlier in stories[:idx]:
+                if self._duplicate({**earlier, 'created_at': iso()}, {'url': story['url'], 'original_headline': story['headline']}):
+                    raise LedgerDuplicate('A card cannot contain duplicate stories')
         for _ in range(4):
             data, sha = self._read()
             for previous in data['records']:
-                if previous['key'] == key or self._duplicate(previous, candidate):
+                if previous['key'] == key or any(self._duplicate(previous, c) for c in candidates):
                     raise LedgerDuplicate('A matching story already has a durable upload claim')
             data['records'].append({
                 'key': key, 'status': 'reserved', 'created_at': iso(),
-                'url': canonical_url(url), 'headline': str(headline)[:500],
-                'editorial_id': editorial_id, 'page_id': page_id,
+                'url': stories[0]['url'], 'headline': stories[0]['headline'],
+                'stories': stories, 'editorial_id': editorial_id, 'page_id': page_id,
                 'caption_marker': caption_marker,
             })
-            if self._write(data, sha, 'Reserve Facebook story before upload'):
+            if self._write(data, sha, 'Reserve all card stories before upload'):
                 return
         raise LedgerUnavailable('Durable ledger changed repeatedly; upload held')
 

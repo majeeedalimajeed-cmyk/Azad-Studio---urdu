@@ -84,8 +84,8 @@ class TranslationValidator:
         urdu_text = clean_text(urdu["urdu_headline"] + " " + " ".join(urdu["urdu_bullets"]))
         roman_text = clean_text(roman["roman_headline"] + " " + " ".join(roman["roman_bullets"]))
 
-        if not 3 <= len(roman["roman_bullets"]) <= 5:
-            errors.append("Roman Urdu must contain 3-5 bullets.")
+        if not 1 <= len(roman["roman_bullets"]) <= 5:
+            errors.append("Roman Urdu must contain 1–5 bullets.")
         if len(urdu["urdu_bullets"]) != len(roman["roman_bullets"]):
             errors.append("Urdu and Roman Urdu bullet counts differ.")
 

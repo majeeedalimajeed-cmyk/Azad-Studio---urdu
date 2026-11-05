@@ -330,8 +330,8 @@ class CardRenderer:
         if bullet_slice:
             a, b = bullet_slice
             urdu_bullets, roman_bullets = urdu_bullets[a:b], roman_bullets[a:b]
-        if not (3 <= len(urdu_bullets) == len(roman_bullets) <= 5):
-            raise LayoutError("Each card requires 3-5 corresponding Urdu and Roman Urdu bullets")
+        if not (1 <= len(urdu_bullets) == len(roman_bullets) <= 5):
+            raise LayoutError("Each card requires 1–5 corresponding English and Roman Urdu bullets")
 
         pub_dt = datetime.fromisoformat((content.publication_time or iso()).replace("Z", "+00:00")).astimezone(ZoneInfo("Asia/Kolkata"))
         date_line = pub_dt.strftime("%d %b %Y").upper()

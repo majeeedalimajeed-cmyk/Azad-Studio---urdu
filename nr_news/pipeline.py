@@ -22,10 +22,11 @@ from .curated_photos import select_curated_photo
 from .db import Database
 from .llm import AgentUnavailable
 from .models import Candidate, EditorialContent, SourceResult, VerificationResult
+from .renderer import LayoutError
 from .sources import SourceMonitor
 from .source_policy import source_allowed
 from .util import (canonical_url, clean_text, iso, is_official_url, json_dumps,
-                   numeric_atoms, redact, sha256_text, parse_iso, utcnow)
+                   numeric_atoms, redact, sha256_text, parse_iso, utcnow, sha256_file, similarity)
 
 
 def _already_posted_manually(text: str) -> bool:
@@ -118,7 +119,7 @@ class NewsPipeline:
             pub = parse_iso(c.get("published_at"))
             if not c or not pub or not (0 <= (utcnow()-pub).total_seconds()/3600 <= self.config.max_story_age_hours):
                 continue
-            if not source_allowed(c) or not select_curated_photo(c.get("original_headline") or "", c.get("original_headline") or "", c.get("body_excerpt") or ""):
+            if not source_allowed(c) or (not self.config.flexible_bulletins_enabled and not select_curated_photo(c.get("original_headline") or "", c.get("original_headline") or "", c.get("body_excerpt") or "")):
                 continue
             self.db.set_review_status(review["id"], "requeued")
             self.db.enqueue_job("verify_story", {"candidate_id": c["id"]},
@@ -290,6 +291,143 @@ class NewsPipeline:
                 results.append({"status": "job_error", "reason": message})
         return results
 
+    def assemble_flexible_bulletin(self) -> dict[str, Any]:
+        """Combine only separately verified, current stories, with one reviewed photo.
+
+        Every selected story contributes all of its reviewed bullets. No model
+        rewrites or mixes their facts; the publication ledger claims every source
+        atomically before the single Facebook upload.
+        """
+        if not self.config.flexible_bulletins_enabled:
+            return {"status": "disabled"}
+        rows = self.db.query("SELECT * FROM editorials WHERE status='bulletin_ready' ORDER BY created_at DESC LIMIT 100", ())
+        ready = []
+        for row in rows:
+            c = self.db.get_candidate(row['candidate_id']) or {}
+            published = parse_iso(c.get('published_at'))
+            if not published or not (-2 <= (utcnow()-published).total_seconds()/3600 <= self.config.max_story_age_hours):
+                self.db.set_editorial_status(row['id'], 'expired')
+                continue
+            if not source_allowed(c) or row.get('approved_by') != 'auto_policy' or self.db.get_setting(f"english_roman_verified:{row['id']}") != 'true':
+                continue
+            en, ru = _json(row.get('urdu_bullets_json'), []), _json(row.get('roman_bullets_json'), [])
+            if not isinstance(en, list) or not isinstance(ru, list) or not 1 <= len(en) == len(ru) <= 5:
+                continue
+            photos = _json(row.get('media_json'), [])
+            valid_photo = None
+            if isinstance(photos, list) and len(photos) == 1 and isinstance(photos[0], dict):
+                m = photos[0]
+                try:
+                    from .curated_photos import PHOTOS
+                    info = PHOTOS.get(m.get('curated_topic'))
+                    if (info and m.get('sha256') == info[1] and sha256_file(m['local_path']) == info[1]
+                        and m.get('license_ref') and m.get('rights_reviewed_by') and m.get('relevance_reviewed_by')):
+                        valid_photo = dict(m)
+                except (OSError, KeyError, TypeError):
+                    pass
+            probe = Candidate(source=c.get('source',''), publisher=c.get('publisher',''), url=c.get('url',''),
+                              original_headline=c.get('original_headline',''), published_at=c.get('published_at'),
+                              updated_at=c.get('updated_at'), language=c.get('language','en'),
+                              body_excerpt=c.get('body_excerpt',''), category=c.get('category',''))
+            ready.append({'editorial':row, 'candidate':c, 'english':en, 'roman':ru,
+                          'photo':valid_photo, 'priority':self.research.priority(probe)})
+        ready.sort(key=lambda x: (x['priority'], x['candidate'].get('published_at') or ''), reverse=True)
+        anchors = [x for x in ready if x['photo']]
+        if not anchors:
+            return {'status':'held', 'reason':'no_relevant_reviewed_photo', 'stories_ready':len(ready)}
+        anchor = anchors[0]
+        chosen, count = [anchor], len(anchor['english'])
+        for item in ready:
+            if item is anchor or count + len(item['english']) > 5:
+                continue
+            if any(similarity(item['candidate'].get('original_headline',''), prev['candidate'].get('original_headline','')) >= .74 or
+                   item['candidate'].get('cluster_id') and item['candidate'].get('cluster_id') == prev['candidate'].get('cluster_id') for prev in chosen):
+                continue
+            chosen.append(item)
+            count += len(item['english'])
+            if count == 5:
+                break
+        raw = _json(anchor['candidate'].get('raw_json'), {})
+        is_breaking = raw.get('scan_mode') == 'breaking'
+        if count < 3 and len(anchor['english']) == 1 and not is_breaking:
+            return {'status':'held', 'reason':'awaiting_more_verified_headlines', 'stories_ready':len(ready)}
+        # If the full card does not fit, remove whole lower-priority stories,
+        # never individual facts or bullets. A single long story is held intact.
+        probe_path = self.config.card_dir / '_bulletin_layout_probe.png'
+        while True:
+            english = [line for x in chosen for line in x['english']]
+            roman = [line for x in chosen for line in x['roman']]
+            if len(english) < 3 and len(anchor['english']) == 1 and not is_breaking:
+                return {'status':'held', 'reason':'awaiting_more_verified_headlines', 'stories_ready':len(ready)}
+            photo = dict(anchor['photo'])
+            if len(chosen) > 1:
+                photo['caption_disclosure'] = (str(photo.get('caption_disclosure') or 'Photo: illustrative file image.') +
+                                               ' Photo relates to: ' + anchor['editorial']['urdu_headline'])
+            content = EditorialContent(
+                urdu_headline=anchor['editorial']['urdu_headline'] if len(chosen)==1 else 'LATEST NEWS UPDATES',
+                urdu_bullets=english,
+                roman_headline=anchor['editorial']['roman_headline'] if len(chosen)==1 else 'AAJ KI AHAM KHABREIN',
+                roman_bullets=roman,
+                verification_notes=['Each story independently verified and reviewed before assembly.'],
+                source_urls=list(dict.fromkeys(url for x in chosen for url in _json(x['editorial'].get('source_urls_json'), []))), publication_time=iso(), media=[photo],
+            )
+            try:
+                self.cards.renderer.draw_card(content, probe_path, media=[photo])
+                break
+            except LayoutError:
+                if len(chosen) <= 1:
+                    return {'status':'held', 'reason':'complete_story_does_not_fit'}
+                chosen.pop()
+            finally:
+                probe_path.unlink(missing_ok=True)
+                (self.config.audit_dir / (probe_path.stem + '.json')).unlink(missing_ok=True)
+        members = [{'editorial_id':x['editorial']['id'], 'candidate_id':x['candidate']['id']} for x in chosen]
+        if len(chosen) == 1:
+            eid = anchor['editorial']['id']
+            self.db.set_editorial_status(eid, 'approved', 'auto_policy')
+        else:
+            eid, created = self.db.insert_editorial(anchor['candidate']['id'], anchor['editorial'].get('cluster_id'), content.to_dict(), status='bulletin_building')
+            existing = self.db.get_editorial(eid) or {}
+            if not created:
+                if existing.get('status') == 'published':
+                    return {'status':'held','reason':'bulletin_already_published'}
+                previous_members = self.db.get_setting(f'bulletin_members:{eid}')
+                if (existing.get('candidate_id') != anchor['candidate']['id'] or
+                    existing.get('status') not in {'bulletin_building','approved','pending_review'} or
+                    (previous_members is None and existing.get('status') != 'bulletin_building') or
+                    (previous_members is not None and _json(previous_members, None) != members)):
+                    return {'status':'held','reason':'conflicting_existing_editorial'}
+            self.db.set_setting(f"bulletin_members:{eid}", json_dumps(members))
+            self.db.set_setting(f"english_roman_verified:{eid}", 'true')
+            self.db.set_editorial_status(eid, 'approved', 'auto_policy')
+        provenance = {'editorial_id':eid, 'members':[
+            {'editorial_id':x['editorial']['id'], 'candidate_id':x['candidate']['id'],
+             'headline':x['candidate']['original_headline'],
+             'source_urls':_json(x['editorial'].get('source_urls_json'), []),
+             'verification_notes':_json(x['editorial'].get('verification_notes_json'), []),
+             'english_bullets':x['english'], 'roman_bullets':x['roman']} for x in chosen],
+             'photo_for_candidate_id':anchor['candidate']['id'], 'photo':photo}
+        (self.config.audit_dir / f'bulletin-{eid}.json').write_text(json_dumps(provenance), encoding='utf-8')
+        try:
+            cards = self.cards.render(eid, content, media=[photo])
+        except Exception as exc:
+            self.db.set_editorial_status(eid, 'pending_review')
+            return {'status':'held', 'reason':'bulletin_layout_error', 'error':type(exc).__name__}
+        if len(cards) != 1 or cards[0].page_count != 1:
+            self.db.set_editorial_status(eid, 'pending_review')
+            return {'status':'held', 'reason':'single_card_required'}
+        card_row = self.db.one("SELECT * FROM cards WHERE file_path=? ORDER BY created_at DESC LIMIT 1", (cards[0].path,))
+        if not card_row:
+            self.db.set_editorial_status(eid, 'pending_review')
+            return {'status':'held', 'reason':'card_unavailable'}
+        outcome = self.publisher.publish(eid, card_row, dry_run=self.config.dry_run)
+        if len(chosen) > 1 and outcome.get('status') in {'success', 'already_published', 'unknown', 'failed'}:
+            for x in chosen:
+                if outcome.get('status') != 'success':
+                    self.db.set_editorial_status(x['editorial']['id'], 'bulletin_claimed')
+        return {'status':'assembled', 'stories':len(chosen), 'bullets':len(english),
+                'editorial_id':eid, 'cards':[cards[0].path], 'publish':outcome}
+
     def drain_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
         outputs: list[dict[str, Any]] = []
         for _ in range(limit):
@@ -307,6 +445,11 @@ class NewsPipeline:
                 self.db.insert_api_event("scheduler", "job", "failed", message,
                                          details={"job_id": job["id"], "type": job["type"]})
                 outputs.append({"job_id": job["id"], "type": job["type"], "status": "job_error", "reason": message})
+        if self.config.flexible_bulletins_enabled:
+            try:
+                outputs.append({'type':'flexible_bulletin', **self.assemble_flexible_bulletin()})
+            except Exception as exc:
+                outputs.append({'type':'flexible_bulletin', 'status':'held', 'reason':'assembly_error', 'error':type(exc).__name__})
         return outputs
 
     def process_job(self, job_type: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -454,7 +597,7 @@ class NewsPipeline:
         # The operator requires one relevant, rights-cleared photo on every
         # automatic card. Hold before spending model quota when none exists.
         curated = select_curated_photo(candidate.get("original_headline", ""), candidate.get("original_headline", ""), article)
-        if not curated:
+        if not curated and not self.config.flexible_bulletins_enabled:
             self.db.close_open_reviews(candidate_id, "reviewed_photo_unavailable")
             self.db.add_review(candidate_id, verification.cluster_id, "reviewed_photo_unavailable", {
                 "reason": "No relevant reviewed photo available; wait rather than publish text-only.",
@@ -513,13 +656,16 @@ class NewsPipeline:
                         "Judge whether this is straight news, not opinion, retrospective analysis, commentary or promotion. "
                         "Judge whether this reports an important event that occurred within the last 36 hours. "
                         "If timing, context, attribution, recency or classification is uncertain, reject. "
-                        "Return JSON with supported, important, current_news and straight_news booleans and issues array. Never infer missing facts."),
+                        "Also judge whether each English and Roman bullet is independently understandable without its headline or another story, with no ambiguous pronouns or missing subject or attribution. "
+                        "Return JSON with supported, important, current_news, straight_news and self_contained_bullets booleans and issues array. Never infer missing facts."),
                 user={"article": article[:10000], "english": urdu, "roman_urdu": roman},
                 model=getattr(self.config, "validator_model", None) or self.config.llm_model,
                 max_tokens=900,
             )
         except AgentUnavailable as exc:
             return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_unavailable", "error": str(exc)}
+        if self.config.flexible_bulletins_enabled and fact_review.get("self_contained_bullets") is not True:
+            return {"status": "held", "candidate_id": candidate_id, "reason": "bulletins_not_self_contained"}
         if fact_review.get("supported") is not True:
             return {"status": "held", "candidate_id": candidate_id, "reason": "fact_review_not_approved"}
         if fact_review.get("important") is not True:
@@ -533,7 +679,7 @@ class NewsPipeline:
         # Only hash-pinned, individually reviewed stock assets with narrowly
         # matching headlines qualify. Other stories remain text-only.
         media_list = select_curated_photo(candidate.get("original_headline", ""), urdu.get("urdu_headline", ""), article)
-        if not media_list:
+        if not media_list and not self.config.flexible_bulletins_enabled:
             self.db.add_review(candidate_id, verification.cluster_id, "reviewed_photo_unavailable", {"reason": "Photo no longer matches generated headline."})
             return {"status": "held", "candidate_id": candidate_id, "reason": "reviewed_photo_unavailable"}
         content = EditorialContent(
@@ -570,16 +716,25 @@ class NewsPipeline:
             self.config.auto_approve_verified and self.config.operator_approved
             and self.config.auto_post_enabled
         ) else "pending_review"
-        approved_by = "auto_policy" if status == "approved" else None
+        if status == "approved" and self.config.flexible_bulletins_enabled:
+            existing = self.db.one("SELECT id FROM editorials WHERE candidate_id=? AND status IN ('bulletin_ready','bulletin_claimed','published') LIMIT 1", (candidate_id,))
+            if existing:
+                return {"status": "already_staged", "candidate_id": candidate_id, "editorial_id": existing['id']}
+            status = "bulletin_ready"
+        approved_by = "auto_policy" if status in {"approved", "bulletin_ready"} else None
         editorial_id, created = self.db.insert_editorial(candidate_id, verification.cluster_id,
                                                          content.to_dict(), status=status)
-        if approved_by:
-            self.db.set_editorial_status(editorial_id, status, approved_by)
-        self._write_audit(editorial_id, candidate, verification, urdu, roman, validation, source_urls, evidence_text)
         if not created:
             return {"status": "duplicate_editorial", "candidate_id": candidate_id,
                     "editorial_id": editorial_id}
+        if approved_by:
+            self.db.set_editorial_status(editorial_id, status, approved_by)
+        self._write_audit(editorial_id, candidate, verification, urdu, roman, validation, source_urls, evidence_text)
         self.db.set_setting(f"english_roman_verified:{editorial_id}", "true")
+        if status == "bulletin_ready":
+            return {"status": "bulletin_ready", "candidate_id": candidate_id,
+                    "editorial_id": editorial_id, "bullet_count": len(content.urdu_bullets),
+                    "reviewed_photo_available": bool(media_list)}
 
         rendered = self.cards.render(editorial_id, content, media=media_list or None)
         if len(rendered) != 1 or rendered[0].page_count != 1:

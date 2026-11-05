@@ -20,8 +20,8 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install RTL runtime dependency
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libraqm0
+      - name: Install test runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libraqm0 ffmpeg
 
       - name: Install Python dependencies
         run: |

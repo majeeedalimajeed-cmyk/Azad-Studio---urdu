@@ -10,7 +10,7 @@ from ..db import Database
 from ..facebook import FacebookGraphClient, GraphAPIError
 from ..publication_ledger import GitHubPublicationLedger, LedgerDuplicate, LedgerUnavailable
 from ..source_policy import source_allowed
-from ..util import iso, json_dumps, redact, sha256_file, sha256_text
+from ..util import iso, json_dumps, redact, sha256_file, sha256_text, parse_iso, utcnow
 
 
 class PublishingAgent:
@@ -166,9 +166,47 @@ class PublishingAgent:
         candidate = self.db.get_candidate(editorial.get("candidate_id")) or {}
         if not source_allowed(candidate):
             return {"status": "held", "reason": "source_not_in_operator_list"}
+        members_value = self.db.get_setting(f"bulletin_members:{editorial_id}")
+        members = None
+        if members_value is not None:
+            members = self._json(members_value, None)
+            if members is None:
+                return {"status": "held", "reason": "invalid_bulletin_members"}
+        candidates = [candidate]
+        if members is not None:
+            if not isinstance(members, list) or not 2 <= len(members) <= 5:
+                return {"status": "held", "reason": "invalid_bulletin_members"}
+            candidates, seen, en, roman = [], set(), [], []
+            for member in members:
+                if not isinstance(member, dict) or not member.get("editorial_id") or not member.get("candidate_id"):
+                    return {"status": "held", "reason": "invalid_bulletin_members"}
+                sid, cid = member["editorial_id"], member["candidate_id"]
+                if cid in seen:
+                    return {"status": "held", "reason": "duplicate_bulletin_story"}
+                seen.add(cid)
+                story = self.db.get_editorial(sid) or {}
+                c = self.db.get_candidate(cid) or {}
+                if (story.get("candidate_id") != cid or story.get("status") not in {"bulletin_ready", "bulletin_claimed"}
+                    or story.get("approved_by") != "auto_policy" or not source_allowed(c)
+                    or self.db.get_setting(f"english_roman_verified:{sid}") != "true"):
+                    return {"status": "held", "reason": "bulletin_story_not_verified"}
+                published = parse_iso(c.get("published_at"))
+                if not published or not (-2 <= (utcnow() - published).total_seconds() / 3600 <= self.config.max_story_age_hours):
+                    return {"status": "held", "reason": "bulletin_story_stale"}
+                en.extend(self._json(story.get("urdu_bullets_json"), []))
+                roman.extend(self._json(story.get("roman_bullets_json"), []))
+                candidates.append(c)
+            if (candidates[0].get("id") != candidate.get("id") or not 1 <= len(en) <= 5
+                or en != self._json(editorial.get("urdu_bullets_json"), [])
+                or roman != self._json(editorial.get("roman_bullets_json"), [])):
+                return {"status": "held", "reason": "bulletin_content_mismatch"}
         try:
-            self.ledger.reserve(key=idempotency_key, candidate=candidate,
-                                editorial_id=editorial_id, page_id=page_id, caption_marker=marker)
+            if members is None:
+                self.ledger.reserve(key=idempotency_key, candidate=candidate,
+                                    editorial_id=editorial_id, page_id=page_id, caption_marker=marker)
+            else:
+                self.ledger.reserve_many(key=idempotency_key, candidates=candidates,
+                                         editorial_id=editorial_id, page_id=page_id, caption_marker=marker)
         except LedgerDuplicate:
             return {"status": "held", "reason": "durable_duplicate_or_previous_attempt"}
         except LedgerUnavailable as exc:
@@ -207,6 +245,11 @@ class PublishingAgent:
                 photo_id=str(response.get("id") or ""), last_error=None,
             )
             self.db.set_editorial_status(editorial_id, "published", "graph_api")
+            for member in members or []:
+                self.db.set_editorial_status(member["editorial_id"], "published", "graph_api")
+                member_story = self.db.get_editorial(member["editorial_id"]) or {}
+                if member_story.get("cluster_id"):
+                    self.db.set_cluster_status(member_story["cluster_id"], "published", post_id)
             cluster_id = editorial.get("cluster_id")
             if cluster_id:
                 self.db.set_cluster_status(cluster_id, "published", post_id)

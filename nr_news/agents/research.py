@@ -59,9 +59,9 @@ PRIORITY_PATTERNS = {
 UNREST = re.compile(r"\bprotest\w*\b|\b(?:riot|riots|rioting|demonstration|demonstrations|rally|rallies|unrest|impeachment)\b", re.I)
 
 RESEARCH_SYSTEM = """You are an English news editor. Use only the supplied original article and verified evidence.
-Only write straight-news coverage of an event that happened recently, not opinion, columns, historical retrospectives or promotional material. Never present a past event as happening now; preserve the exact timing of the event. Write a concise original English headline and exactly three brief English bullets. Each bullet must be at most 105 characters including spaces so both languages fit on one card. The schema has legacy key names: put English in urdu_headline and urdu_bullets, NOT Urdu script.
+Only write straight-news coverage of an event that happened recently, not opinion, columns, historical retrospectives or promotional material. Never present a past event as happening now; preserve the exact timing of the event. Write a concise original English headline and one to five brief English bullets. Use one bullet for a headline-only report, or enough bullets to preserve essential context for an important or breaking story; do not invent filler. Each bullet must be understandable by itself without the headline or other stories: name the people, subject and relevant place rather than using unexplained pronouns. Each bullet must be at most 105 characters including spaces so both languages fit on one card. The schema has legacy key names: put English in urdu_headline and urdu_bullets, NOT Urdu script.
 Preserve names, dates, figures, locations, titles, uncertainties and attribution. Never present a proposal as an approved decision. Never invent facts, sources or quotations. Exclude partisan accusations, political claims, opinions, motivations and speculative analysis; cover only verifiable, neutral event facts. Never transfer an attributed statement from one speaker to another. Do not conflate completed projects opened or inaugurated with new projects whose foundation stones were laid; distinguish them explicitly or omit the new projects. Omit anything whose precise attribution is unclear. Do not copy wording verbatim. Flag any doubt for human review.
-Return ONLY one JSON object using exactly this shape: {"urdu_headline": "English headline", "urdu_bullets": ["English bullet 1", "English bullet 2", "English bullet 3"], "verification_notes": [], "facts": {"names": [], "dates": [], "figures": [], "locations": [], "claim_status": "confirmed"}, "requires_human_review": false}. The facts field MUST be an object, never a list.
+Return ONLY one JSON object using exactly this shape: {"urdu_headline": "English headline", "urdu_bullets": ["One to five concise, factually complete English bullets"], "verification_notes": [], "facts": {"names": [], "dates": [], "figures": [], "locations": [], "claim_status": "confirmed"}, "requires_human_review": false}. The facts field MUST be an object, never a list.
 """
 
 
@@ -238,8 +238,8 @@ class ResearchAgent:
         if not isinstance(data.get("urdu_headline"), str) or not data["urdu_headline"].strip():
             raise AgentUnavailable("Agent A returned no Urdu headline")
         bullets = data.get("urdu_bullets")
-        if not isinstance(bullets, list) or len(bullets) != 3:
-            raise AgentUnavailable("Agent A must return exactly three English bullets")
+        if not isinstance(bullets, list) or not 1 <= len(bullets) <= 5:
+            raise AgentUnavailable("Agent A must return 1–5 English bullets")
         if any(isinstance(x, str) and len(x) > 125 for x in bullets):
             raise AgentUnavailable("Agent A bullets exceed the single-card size limit")
         if any(not isinstance(x, str) or len(x.strip()) < 5 for x in bullets):

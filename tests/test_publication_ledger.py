@@ -97,3 +97,51 @@ def test_compare_and_swap_conflict_rereads_and_blocks_race():
 def test_probe_does_not_create_story_claim():
     gh=FakeGitHub();ledger(gh).probe()
     assert gh.data['records']==[] and gh.data['last_write_probe']['at']
+
+
+def test_all_stories_reserved_atomically_and_later_blocked_individually():
+    gh=FakeGitHub();l=ledger(gh)
+    first=candidate();second=candidate('https://indiatoday.in/news/other','Rupee rises against the dollar')
+    l.reserve_many(key='batch1',candidates=[first,second],editorial_id='e',page_id='p',caption_marker='m')
+    assert len(gh.data['records'])==1 and len(gh.data['records'][0]['stories'])==2
+    with pytest.raises(LedgerDuplicate):reserve(l,'other',second)
+    with pytest.raises(LedgerDuplicate):reserve(l,'third',first)
+
+
+def test_batch_duplicate_and_write_failure_are_fail_closed():
+    gh=FakeGitHub();l=ledger(gh)
+    with pytest.raises(LedgerDuplicate):
+        l.reserve_many(key='batch',candidates=[candidate(),candidate()],editorial_id='e',page_id='p',caption_marker='m')
+    assert gh.data['records']==[]
+    gh.mode='write_fail'
+    with pytest.raises(LedgerUnavailable):
+        l.reserve_many(key='batch',candidates=[candidate()],editorial_id='e',page_id='p',caption_marker='m')
+    assert gh.data['records']==[]
+
+
+def test_batch_timeout_after_commit_blocks_each_story_after_restart():
+    gh=FakeGitHub();gh.mode='lost_write_response'
+    first=candidate();second=candidate('https://indiatoday.in/another','Odisha declares cyclone warning')
+    with pytest.raises(LedgerUnavailable):
+        ledger(gh).reserve_many(key='batch',candidates=[first,second],editorial_id='e',page_id='p',caption_marker='m')
+    assert len(gh.data['records'])==1 and len(gh.data['records'][0]['stories'])==2
+    gh.mode='ok'
+    for i,story in enumerate([first,second]):
+        with pytest.raises(LedgerDuplicate):reserve(ledger(gh),'restart'+str(i),story)
+
+
+def test_batch_conflict_rereads_and_cannot_partially_claim():
+    second=candidate('https://indiatoday.in/another','Odisha declares cyclone warning')
+    class Race(FakeGitHub):
+        def request(self,method,url,**kwargs):
+            if method=='PUT' and self.puts==0:
+                self.puts+=1
+                self.data['records'].append({'key':'other','status':'reserved','created_at':iso(),
+                    'url':second['url'],'headline':second['original_headline']})
+                self.revision+=1
+                return Response(409)
+            return super().request(method,url,**kwargs)
+    gh=Race()
+    with pytest.raises(LedgerDuplicate):
+        ledger(gh).reserve_many(key='batch',candidates=[candidate(),second],editorial_id='e',page_id='p',caption_marker='m')
+    assert len(gh.data['records'])==1 and gh.data['records'][0]['key']=='other'
