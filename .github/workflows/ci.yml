@@ -35,6 +35,9 @@ jobs:
         run: python -m pytest -q tests
 
       - name: Render verified dry-run fixture
+        # Fixed historical test data; this override is CI-only, never live news.
+        env:
+          NR_MAX_STORY_AGE_HOURS: "87600"
         run: |
           python -m nr_news.cli init
           python -m nr_news.cli fixture
