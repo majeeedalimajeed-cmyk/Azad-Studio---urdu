@@ -17,6 +17,7 @@ from .agents import (CardAgent, MediaAgent, PublishingAgent, ResearchAgent,
                      VideoWorkflow)
 from .agents.verification import EvidenceFetcher, editorial_exclusion_text
 from .agents.research import UNREST
+from .agents.publisher import known_incorrect_draft
 from .config import CONFIG
 from .curated_photos import select_curated_photo
 from .db import Database
@@ -303,6 +304,10 @@ class NewsPipeline:
         rows = self.db.query("SELECT * FROM editorials WHERE status='bulletin_ready' ORDER BY created_at DESC LIMIT 100", ())
         ready = []
         for row in rows:
+            if known_incorrect_draft(row):
+                self.db.set_editorial_status(row['id'], 'pending_review')
+                self.db.add_review(row['candidate_id'], row.get('cluster_id'), 'known_incorrect_draft', {'editorial_id':row['id']})
+                continue
             c = self.db.get_candidate(row['candidate_id']) or {}
             published = parse_iso(c.get('published_at'))
             if not published or not (-2 <= (utcnow()-published).total_seconds()/3600 <= self.config.max_story_age_hours):
@@ -333,9 +338,9 @@ class NewsPipeline:
                           'photo':valid_photo, 'priority':self.research.priority(probe)})
         ready.sort(key=lambda x: (x['priority'], x['candidate'].get('published_at') or ''), reverse=True)
         anchors = [x for x in ready if x['photo']]
-        if not anchors:
-            return {'status':'held', 'reason':'no_relevant_reviewed_photo', 'stories_ready':len(ready)}
-        anchor = anchors[0]
+        if not anchors and (not self.config.allow_text_only or not ready):
+            return {'status':'held', 'reason':'no_relevant_reviewed_photo' if ready else 'no_verified_stories', 'stories_ready':len(ready)}
+        anchor = anchors[0] if anchors else ready[0]
         chosen, count = [anchor], len(anchor['english'])
         for item in ready:
             if item is anchor or count + len(item['english']) > 5:
@@ -349,7 +354,7 @@ class NewsPipeline:
                 break
         raw = _json(anchor['candidate'].get('raw_json'), {})
         is_breaking = raw.get('scan_mode') == 'breaking'
-        if count < 3 and len(anchor['english']) == 1 and not is_breaking:
+        if not self.config.allow_text_only and count < 3 and len(anchor['english']) == 1 and not is_breaking:
             return {'status':'held', 'reason':'awaiting_more_verified_headlines', 'stories_ready':len(ready)}
         # If the full card does not fit, remove whole lower-priority stories,
         # never individual facts or bullets. A single long story is held intact.
@@ -357,10 +362,10 @@ class NewsPipeline:
         while True:
             english = [line for x in chosen for line in x['english']]
             roman = [line for x in chosen for line in x['roman']]
-            if len(english) < 3 and len(anchor['english']) == 1 and not is_breaking:
+            if not self.config.allow_text_only and len(english) < 3 and len(anchor['english']) == 1 and not is_breaking:
                 return {'status':'held', 'reason':'awaiting_more_verified_headlines', 'stories_ready':len(ready)}
-            photo = dict(anchor['photo'])
-            if len(chosen) > 1:
+            photo = dict(anchor['photo']) if anchor['photo'] else None
+            if photo and len(chosen) > 1:
                 photo['caption_disclosure'] = (str(photo.get('caption_disclosure') or 'Photo: illustrative file image.') +
                                                ' Photo relates to: ' + anchor['editorial']['urdu_headline'])
             content = EditorialContent(
@@ -369,10 +374,10 @@ class NewsPipeline:
                 roman_headline=anchor['editorial']['roman_headline'] if len(chosen)==1 else 'AAJ KI AHAM KHABREIN',
                 roman_bullets=roman,
                 verification_notes=['Each story independently verified and reviewed before assembly.'],
-                source_urls=list(dict.fromkeys(url for x in chosen for url in _json(x['editorial'].get('source_urls_json'), []))), publication_time=iso(), media=[photo],
+                source_urls=list(dict.fromkeys(url for x in chosen for url in _json(x['editorial'].get('source_urls_json'), []))), publication_time=iso(), media=[photo] if photo else None,
             )
             try:
-                self.cards.renderer.draw_card(content, probe_path, media=[photo])
+                self.cards.renderer.draw_card(content, probe_path, media=[photo] if photo else None)
                 break
             except LayoutError:
                 if len(chosen) <= 1:
@@ -406,10 +411,10 @@ class NewsPipeline:
              'source_urls':_json(x['editorial'].get('source_urls_json'), []),
              'verification_notes':_json(x['editorial'].get('verification_notes_json'), []),
              'english_bullets':x['english'], 'roman_bullets':x['roman']} for x in chosen],
-             'photo_for_candidate_id':anchor['candidate']['id'], 'photo':photo}
+             'photo_for_candidate_id':anchor['candidate']['id'] if photo else None, 'photo':photo}
         (self.config.audit_dir / f'bulletin-{eid}.json').write_text(json_dumps(provenance), encoding='utf-8')
         try:
-            cards = self.cards.render(eid, content, media=[photo])
+            cards = self.cards.render(eid, content, media=[photo] if photo else None)
         except Exception as exc:
             self.db.set_editorial_status(eid, 'pending_review')
             return {'status':'held', 'reason':'bulletin_layout_error', 'error':type(exc).__name__}

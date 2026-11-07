@@ -114,6 +114,7 @@ class Config:
     auto_approve_verified: bool = field(default_factory=lambda: _bool("NR_AUTO_APPROVE_VERIFIED", False))
     auto_post_enabled: bool = field(default_factory=lambda: _bool("NR_AUTO_POST_ENABLED", False))
     flexible_bulletins_enabled: bool = field(default_factory=lambda: _bool("NR_FLEXIBLE_BULLETINS_ENABLED", False))
+    allow_text_only: bool = field(default_factory=lambda: _bool("NR_ALLOW_TEXT_ONLY", False))
     video_enabled: bool = field(default_factory=lambda: _bool("NR_VIDEO_ENABLED", False))
     admin_token: str | None = field(default_factory=lambda: _secret("NR_ADMIN_TOKEN"))
 

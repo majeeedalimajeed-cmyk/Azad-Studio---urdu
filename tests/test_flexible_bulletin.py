@@ -192,3 +192,56 @@ def test_stale_member_fails_closed_at_publisher(tmp_path):
     p.db.execute('UPDATE candidates SET published_at=? WHERE id=?',('2020-01-01T00:00:00+00:00',members[1]['candidate_id']))
     assert p.publisher.publish(out['editorial_id'],card,dry_run=False)['reason']=='bulletin_story_stale'
     assert not p.publisher.graph.calls and not p.publisher.ledger.claims
+
+
+def test_text_only_bulletin_publishes_and_crossposts_when_user_allows(tmp_path):
+    p=setup_pipeline(tmp_path);p.config=replace(p.config,allow_text_only=True)
+    stage(p,1,'Telangana opens a hospital',['Telangana opened a hospital.'],['Telangana mein hospital khula.'])
+    stage(p,2,'Odisha issues cyclone warning',['Odisha issued a cyclone warning.'],['Odisha mein tufan ki warning jari hui.'])
+    stage(p,3,'Rajasthan announces rail service',['Rajasthan announced a rail service.'],['Rajasthan mein rail service ka elan hua.'])
+    original=p.publisher;p.publisher=type('Capture',(),{'publish':lambda *args,**kwargs:{'status':'dry_run'}})()
+    out=p.assemble_flexible_bulletin();p.publisher=original
+    assert out['status']=='assembled' and out['bullets']==3
+    card=live_publisher(p,out)
+    assert p.db.get_setting('card_explicit_text_only:'+card['sha256'])=='true'
+    result=p.publisher.publish(out['editorial_id'],card,dry_run=False)
+    assert result['status']=='success' and result['instagram']['status']=='success'
+    assert len(p.publisher.ledger.claims[0]['candidates'])==3
+
+
+def test_text_only_stays_blocked_without_opt_in_and_forged_photo_is_rejected(tmp_path):
+    p=setup_pipeline(tmp_path);p.config=replace(p.config,allow_text_only=True)
+    stage(p,1,'Telangana opens a hospital',['Telangana opened a hospital.'],['Telangana mein hospital khula.'])
+    p.publisher.publish=lambda *args,**kwargs:{'status':'dry_run'}
+    out=p.assemble_flexible_bulletin();assert out['status']=='assembled'
+    from nr_news.agents.publisher import PublishingAgent
+    p.publisher=PublishingAgent(p.db,config=replace(p.config,allow_text_only=False))
+    card=live_publisher(p,out)
+    p.publisher.config=replace(p.publisher.config,allow_text_only=False)
+    assert p.publisher.publish(out['editorial_id'],card,dry_run=False)['reason']=='reviewed_photo_required'
+    p.publisher.config=replace(p.publisher.config,allow_text_only=True)
+    p.db.execute('UPDATE editorials SET media_json=? WHERE id=?',(json.dumps([{'url':'not-reviewed'}]),out['editorial_id']))
+    assert p.publisher.publish(out['editorial_id'],card,dry_run=False)['reason']=='reviewed_photo_required'
+    assert not p.publisher.graph.calls
+
+
+def test_known_bad_queued_draft_is_quarantined(tmp_path):
+    p=setup_pipeline(tmp_path);p.config=replace(p.config,allow_text_only=True)
+    cid,eid=stage(p,1,'Supreme Court issues contempt notices',
+        ['The post targeted the Chief Justice before being deleted on October 12.'],['Post pehle October 12 ko delete hui.'])
+    stage(p,2,'Telangana opens a hospital',['Telangana opened a hospital.'],['Telangana mein hospital khula.'])
+    p.publisher.publish=lambda *args,**kwargs:{'status':'dry_run'}
+    out=p.assemble_flexible_bulletin()
+    assert out['status']=='assembled'
+    assert p.db.get_editorial(eid)['status']=='pending_review'
+    combined=p.db.get_editorial(out['editorial_id'])
+    assert 'deleted on October 12' not in combined['urdu_bullets_json']
+
+
+def test_photo_still_preferred_when_text_only_allowed(tmp_path):
+    p=setup_pipeline(tmp_path);p.config=replace(p.config,allow_text_only=True)
+    stage(p,1,'Paraguay president faces impeachment',['Paraguay lawmakers moved a motion.'],['Paraguay mein motion pesh hua.'],True)
+    stage(p,2,'Telangana opens a hospital',['Telangana opened a hospital.'],['Telangana mein hospital khula.'])
+    p.publisher.publish=lambda *args,**kwargs:{'status':'dry_run'}
+    out=p.assemble_flexible_bulletin();ed=p.db.get_editorial(out['editorial_id'])
+    assert json.loads(ed['media_json']) and out['status']=='assembled'

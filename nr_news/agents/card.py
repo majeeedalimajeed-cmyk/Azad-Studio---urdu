@@ -32,6 +32,11 @@ class CardAgent:
             )
             self.db.set_setting(f"card_current_layout:{card.sha256}", "true")
             photos = card.audit.get("media") or []
+            if (not media and not content.media and card.audit.get("media_count") == 0
+                and not card.audit.get("photo_boxes")):
+                # Only an intentionally rendered text-only card gets this marker.
+                # Missing or unreviewed photo files must never be silently approved.
+                self.db.set_setting(f"card_explicit_text_only:{card.sha256}", "true")
             reviewed = False
             if len(photos) == 1 and isinstance(photos[0], dict):
                 item = photos[0]

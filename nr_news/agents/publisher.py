@@ -13,6 +13,14 @@ from ..source_policy import source_allowed
 from ..util import iso, json_dumps, redact, sha256_file, sha256_text, parse_iso, utcnow
 
 
+def known_incorrect_draft(editorial: dict[str, Any]) -> bool:
+    """Quarantine previously staged outputs with observed factual/language errors."""
+    text = " ".join(str(editorial.get(k) or "") for k in
+                    ("urdu_headline", "urdu_bullets_json", "roman_headline", "roman_bullets_json")).lower()
+    return ("before being deleted on october 12" in text or
+            "indian student boston, us mein gum ho gaya" in text)
+
+
 class PublishingAgent:
     def __init__(self, db: Database | None = None, graph: FacebookGraphClient | None = None, config=CONFIG,
                  ledger: GitHubPublicationLedger | None = None):
@@ -61,6 +69,9 @@ class PublishingAgent:
         editorial = self.db.get_editorial(editorial_id)
         if not editorial:
             return {"status": "held", "reason": "editorial_not_found"}
+        if known_incorrect_draft(editorial):
+            self.db.set_editorial_status(editorial_id, "pending_review")
+            return {"status": "held", "reason": "known_incorrect_draft_requires_review"}
         if editorial.get("approved_by") == "dry_run_fixture" and not dry_run:
             self.db.insert_api_event("facebook", "publish", "held",
                                      "Dry-run test fixture is not eligible for live publication.",
@@ -86,7 +97,11 @@ class PublishingAgent:
             if not digest or self.db.get_setting(f"card_current_layout:{digest}") != "true":
                 return {"status": "held", "reason": "current_card_rebuild_required"}
             if self.db.get_setting(f"card_reviewed_photo:{digest}") != "true":
-                return {"status": "held", "reason": "reviewed_photo_required"}
+                no_photo = (self.config.allow_text_only and
+                            self.db.get_setting(f"card_explicit_text_only:{digest}") == "true" and
+                            not self._json(editorial.get("media_json"), []))
+                if not no_photo:
+                    return {"status": "held", "reason": "reviewed_photo_required"}
             try:
                 if sha256_file(card_row["file_path"]) != digest:
                     return {"status": "held", "reason": "current_card_hash_mismatch"}
@@ -186,6 +201,9 @@ class PublishingAgent:
                 seen.add(cid)
                 story = self.db.get_editorial(sid) or {}
                 c = self.db.get_candidate(cid) or {}
+                if known_incorrect_draft(story):
+                    self.db.set_editorial_status(sid, "pending_review")
+                    return {"status": "held", "reason": "known_incorrect_draft_requires_review"}
                 if (story.get("candidate_id") != cid or story.get("status") not in {"bulletin_ready", "bulletin_claimed"}
                     or story.get("approved_by") != "auto_policy" or not source_allowed(c)
                     or self.db.get_setting(f"english_roman_verified:{sid}") != "true"):
