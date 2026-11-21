@@ -41,4 +41,3 @@ if tok and pid:
    else:print('Meta: configured Page unavailable',flush=True)
  except Exception as e:print('Meta check failed',type(e).__name__,flush=True)
 else:print('Meta: missing credential or Page ID')
-PY
